@@ -1242,15 +1242,22 @@ handle_netdev(struct __ctx_buff *ctx, const bool from_host)
  * - L2 announcements are enabled, or
  * - WireGuard's host-to-host encryption and BPF NodePort are enabled
  */
+
+//const char cil_from_netdev_msg[] __attribute__((section(".rodata.config"))) = "yama!\n";
+
+
 __section_entry
 int cil_from_netdev(struct __ctx_buff *ctx)
 {
 	__u32 src_id = 0;
+	//__u32 size1=sizeof("yama!\n");
 
 #ifdef ENABLE_NODEPORT_ACCELERATION
 	__u32 flags = ctx_get_xfer(ctx, XFER_FLAGS);
 #endif
 	int ret;
+
+	//trace_printk(cil_from_netdev_msg, size1);
 
 	/* Filter allowed vlan id's and pass them back to kernel.
 	 * We will see the packet again in from-netdev@eth0.vlanXXX.
