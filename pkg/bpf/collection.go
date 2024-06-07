@@ -379,9 +379,9 @@ func inlineGlobalData(spec *ebpf.CollectionSpec) error {
 				continue
 			}
 
-			/*if ins.Reference() != globalDataMap {
+			if ins.Reference() != globalDataMap {
 				return fmt.Errorf("global constants must be in %s, but found reference to %s", globalDataMap, ins.Reference())
-			}*/
+			}
 
 			// Get the offset of the read within the target map,
 			// stored in the 32 most-significant bits of Constant.
