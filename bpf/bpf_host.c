@@ -1250,7 +1250,7 @@ __section_entry
 int cil_from_netdev(struct __ctx_buff *ctx)
 {
 	__u32 src_id = 0;
-	//__u32 size1=sizeof("yama!\n");
+	//__u32 size1=sizeof(cil_from_netdev_msg);
 
 #ifdef ENABLE_NODEPORT_ACCELERATION
 	__u32 flags = ctx_get_xfer(ctx, XFER_FLAGS);
@@ -1311,6 +1311,7 @@ int cil_from_host(struct __ctx_buff *ctx)
 	/* Traffic from the host ns going through cilium_host device must
 	 * not be subject to EDT rate-limiting.
 	 */
+	printk("cil_from_host\n");
 	edt_set_aggregate(ctx, 0);
 	return handle_netdev(ctx, true);
 }
