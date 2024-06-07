@@ -1448,7 +1448,7 @@ int cil_from_container(struct __ctx_buff *ctx)
 	__s8 ext_err = 0;
 	int ret;
 
-	printk("cil_from_container\n");
+	//printk("cil_from_container\n");
 	bpf_clear_meta(ctx);
 	reset_queue_mapping(ctx);
 

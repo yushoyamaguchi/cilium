@@ -1311,7 +1311,8 @@ int cil_from_host(struct __ctx_buff *ctx)
 	/* Traffic from the host ns going through cilium_host device must
 	 * not be subject to EDT rate-limiting.
 	 */
-	printk("cil_from_host\n");
+	//printk("cil_from_host\n");
+	cilium_dbg(ctx, DBG_CAPTURE_UNSPEC, 11, 22);
 	edt_set_aggregate(ctx, 0);
 	return handle_netdev(ctx, true);
 }
