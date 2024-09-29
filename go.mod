@@ -113,8 +113,7 @@ require (
 	golang.org/x/term v0.24.0
 	golang.org/x/time v0.6.0
 	golang.org/x/tools v0.25.0
-	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173
-	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
+	golang.zx2c4.com/wireguard v0.0.20201121
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240924160255-9d4c2d233b61
 	google.golang.org/grpc v1.67.0
 	google.golang.org/protobuf v1.34.2
@@ -333,7 +332,12 @@ require (
 replace (
 	go.universe.tf/metallb => github.com/cilium/metallb v0.1.1-0.20220829170633-5d7dfb1129f7
 
+	golang.zx2c4.com/wireguard => ./local-mods/golang.zx2c4.com/wireguard
+	golang.zx2c4.com/wireguard/wgctrl => ./local-mods/golang.zx2c4.com/wireguard/wgctrl
+
 	// Using private fork of controller-tools. See commit msg for more context
 	// as to why we are using a private fork.
 	sigs.k8s.io/controller-tools => github.com/cilium/controller-tools v0.16.1-1
 )
+
+exclude golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230429144221-925a1e7659e6
