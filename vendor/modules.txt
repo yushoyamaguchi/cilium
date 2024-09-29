@@ -1749,7 +1749,7 @@ golang.org/x/tools/internal/versions
 # golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
 ## explicit; go 1.17
 golang.zx2c4.com/wintun
-# golang.zx2c4.com/wireguard v0.0.20201121 => ./local-mods/golang.zx2c4.com/wireguard
+# golang.zx2c4.com/wireguard v0.0.20201121 => ../local-mods/golang.zx2c4.com/wireguard
 ## explicit; go 1.23.0
 golang.zx2c4.com/wireguard/conn
 golang.zx2c4.com/wireguard/conn/winrio
@@ -2785,6 +2785,6 @@ sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
 sigs.k8s.io/yaml/goyaml.v3
 # go.universe.tf/metallb => github.com/cilium/metallb v0.1.1-0.20220829170633-5d7dfb1129f7
-# golang.zx2c4.com/wireguard => ./local-mods/golang.zx2c4.com/wireguard
-# golang.zx2c4.com/wireguard/wgctrl => ./local-mods/golang.zx2c4.com/wireguard/wgctrl
+# golang.zx2c4.com/wireguard => ../local-mods/golang.zx2c4.com/wireguard
+# golang.zx2c4.com/wireguard/wgctrl => ../local-mods/golang.zx2c4.com/wireguard/wgctrl
 # sigs.k8s.io/controller-tools => github.com/cilium/controller-tools v0.16.1-1
