@@ -679,6 +679,8 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 	__u32 magic = MARK_MAGIC_IDENTITY;
 	bool from_proxy = false;
 
+	//cilium_dbg(ctx, 69, 69, 69); //yama_debug
+
 	if (from_host && tc_index_from_ingress_proxy(ctx)) {
 		from_proxy = true;
 		magic = MARK_MAGIC_PROXY_INGRESS;
