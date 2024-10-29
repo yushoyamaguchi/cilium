@@ -2069,6 +2069,8 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 {
 	struct ipv4_ct_tuple tmp = *tuple;
 
+	cilium_dbg(ctx, 69, 69, 75);
+
 	/* Parse DSR info from the packet, to get the addr/port of the
 	 * addressed service. We need this for RevDNATing the backend's replies.
 	 *
@@ -2390,8 +2392,14 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 					   &rev_nat_index, is_defined(ENABLE_DSR)))
 		return NULL;
 
-	if (rev_nat_index)
-		return lb4_lookup_rev_nat_entry(ctx, rev_nat_index);
+	if (rev_nat_index){
+		struct lb4_reverse_nat *rev_nat_entry;
+		rev_nat_entry=lb4_lookup_rev_nat_entry(ctx, rev_nat_index);
+		if (rev_nat_entry && rev_nat_entry->address == bpf_htonl(0xAC150000)){
+			cilium_dbg(ctx, 69, 69, 3); 
+		}			
+		return rev_nat_entry;
+	}
 
 #ifdef ENABLE_DSR
 	dsr_tuple = *tuple;
@@ -2401,8 +2409,12 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 	dsr_tuple.dport = tuple->sport;
 
 	dsr_entry = nodeport_dsr_lookup_v4_nat_entry(&dsr_tuple);
-	if (dsr_entry)
+	if (dsr_entry){
+		if(dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
+			cilium_dbg(ctx, 69, 69, 4); 
+		}
 		return &dsr_entry->nat_info;
+	}
 #endif
 
 	return NULL;
