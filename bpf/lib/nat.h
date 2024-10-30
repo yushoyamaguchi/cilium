@@ -480,12 +480,16 @@ snat_v4_rev_nat_can_skip(const struct ipv4_nat_target *target, const struct ipv4
  * - on CT_NEW (ie. the tuple is reversed)
  */
 static __always_inline __maybe_unused int
-snat_v4_create_dsr(const struct ipv4_ct_tuple *tuple,
+snat_v4_create_dsr(struct __ctx_buff *ctx, const struct ipv4_ct_tuple *tuple,
 		   __be32 to_saddr, __be16 to_sport, __s8 *ext_err)
 {
 	struct ipv4_ct_tuple tmp = *tuple;
 	struct ipv4_nat_entry state = {};
 	int ret;
+
+	if (to_saddr == bpf_htonl(0xAC150000)) {
+		cilium_dbg(ctx, 69, 69, 8);
+	}
 
 	build_bug_on(sizeof(struct ipv4_nat_entry) > 64);
 

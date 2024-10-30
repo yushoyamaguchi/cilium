@@ -2069,7 +2069,7 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 {
 	struct ipv4_ct_tuple tmp = *tuple;
 
-	cilium_dbg(ctx, 69, 69, 75);
+	//cilium_dbg(ctx, 69, 69, 75);
 
 	/* Parse DSR info from the packet, to get the addr/port of the
 	 * addressed service. We need this for RevDNATing the backend's replies.
@@ -2357,7 +2357,7 @@ create_ct:
 		ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
 				 CT_EGRESS, &ct_state_new, ext_err);
 		if (!IS_ERR(ret))
-			ret = snat_v4_create_dsr(tuple, addr, port, ext_err);
+			ret = snat_v4_create_dsr(ctx, tuple, addr, port, ext_err);
 
 		if (IS_ERR(ret))
 			return ret;
@@ -2386,17 +2386,41 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 {
 	struct ipv4_nat_entry *dsr_entry __maybe_unused;
 	struct ipv4_ct_tuple dsr_tuple __maybe_unused;
+	struct ipv4_ct_tuple dsr_tuple2 __maybe_unused;
 	__u16 rev_nat_index = 0;
+	bool has_nodeport_egress_entry;
 
-	if (!ct_has_nodeport_egress_entry4(get_ct_map4(tuple), tuple,
-					   &rev_nat_index, is_defined(ENABLE_DSR)))
+	has_nodeport_egress_entry = ct_has_nodeport_egress_entry4(get_ct_map4(tuple), tuple, &rev_nat_index, is_defined(ENABLE_DSR));
+#ifdef ENABLE_DSR	
+	dsr_tuple2 = *tuple;
+	dsr_tuple2.flags = NAT_DIR_EGRESS;
+	dsr_tuple2.sport = tuple->dport;
+	dsr_tuple2.dport = tuple->sport;
+	dsr_entry = nodeport_dsr_lookup_v4_nat_entry(&dsr_tuple2);
+	if (dsr_entry) {
+		if (dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
+			//cilium_dbg(ctx, 69, 69, 11); // yama_debug ここは表示されても下のは表示されない
+			if (!has_nodeport_egress_entry){
+				cilium_dbg(ctx, 69, 69, 12); // yama_debug 空振り ct_has_nodeport_egress_entry4() で弾かれてるわけではない
+				// (そもそもnodeport_rev_dnat_get_info_ipv4に入ってない)
+			}
+		}
+	}
+#endif /* ENABLE_DSR */
+
+	if (!has_nodeport_egress_entry){
+		//cilium_dbg(ctx, 69, 69, 10); // yama_debug ここで弾かれてる？ ここに当てはまるの多すぎてわからん... これから調べる
 		return NULL;
+	}
 
 	if (rev_nat_index){
 		struct lb4_reverse_nat *rev_nat_entry;
 		rev_nat_entry=lb4_lookup_rev_nat_entry(ctx, rev_nat_index);
 		if (rev_nat_entry && rev_nat_entry->address == bpf_htonl(0xAC150000)){
-			cilium_dbg(ctx, 69, 69, 3); 
+			cilium_dbg(ctx, 69, 69, 3); // yama_debug 空振り (LBの着地点になってるノード以外では)
+		}
+		if (rev_nat_entry && (rev_nat_entry->address == bpf_htonl(0xAC120002) || rev_nat_entry->address == bpf_htonl(0xAC120003) || rev_nat_entry->address == bpf_htonl(0xAC120004) ) ) {
+			cilium_dbg(ctx, 69, 69, 2); // yama_debug 空振り
 		}			
 		return rev_nat_entry;
 	}
@@ -2412,6 +2436,9 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 	if (dsr_entry){
 		if(dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
 			cilium_dbg(ctx, 69, 69, 4); 
+		}
+		if (dsr_entry->nat_info.address == bpf_htonl(0xAC120002) || dsr_entry->nat_info.address == bpf_htonl(0xAC120003) || dsr_entry->nat_info.address == bpf_htonl(0xAC120004) ) {
+			cilium_dbg(ctx, 69, 69, 5); // yama_debug 空振り ここで不適なアドレスに変換されてるわけではない
 		}
 		return &dsr_entry->nat_info;
 	}
@@ -3133,6 +3160,9 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	void *data, *data_end;
 	bool has_l4_header, is_fragment;
 	struct iphdr *ip4;
+	struct ipv4_ct_tuple dsr_tuple2 __maybe_unused;
+	struct ipv4_nat_entry *dsr_entry __maybe_unused;
+	struct ipv4_ct_tuple *tuple_ptr;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -3141,11 +3171,30 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	is_fragment = ipv4_is_fragment(ip4);
 
 	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, &l4_off, &tuple);
+	tuple_ptr = &tuple;
+
+	dsr_tuple2 = *tuple_ptr;
+	dsr_tuple2.flags = NAT_DIR_EGRESS;
+	dsr_tuple2.sport = tuple_ptr->dport;
+	dsr_tuple2.dport = tuple_ptr->sport;
+	dsr_entry = nodeport_dsr_lookup_v4_nat_entry(&dsr_tuple2);
+	if (dsr_entry) {
+		if (dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
+			// cilium_dbg(ctx, 69, 69, 113); // yama_debug 下のやつとセットだった
+		}
+	}
+
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			return CTX_ACT_OK;
 		return ret;
+	}
+
+	if (dsr_entry) {
+		if (dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
+			// cilium_dbg(ctx, 69, 69, 115);  // yama_debug 上のやつとセットだった
+		}
 	}
 
 	nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tuple);
@@ -3260,6 +3309,8 @@ __handle_nat_fwd_ipv4(struct __ctx_buff *ctx, __u32 cluster_id __maybe_unused,
 	bool snat_done = false;
 	int ret;
 
+	//cilium_dbg(ctx, 69, 69, 16);  // yama_debug ここは nodeportもbpf_masqもdisableでも通る
+
 	ret = nodeport_rev_dnat_fwd_ipv4(ctx, &snat_done, revdnat_only, trace, ext_err);
 	if (ret != CTX_ACT_OK || revdnat_only)
 		return ret;
@@ -3268,7 +3319,10 @@ __handle_nat_fwd_ipv4(struct __ctx_buff *ctx, __u32 cluster_id __maybe_unused,
     (defined(ENABLE_DSR) && defined(ENABLE_DSR_HYBRID)) ||		\
      defined(ENABLE_MASQUERADE_IPV4) ||					\
     (defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT))
+	//cilium_dbg(ctx, 69, 69, 17); // yama_debug bpf_masq enableの時だけ通るが、bpf_masq off で enable_nodeport をonにしても通らない が、この先コメントアウトしても通信には影響なし
+	//enable_nodeport を falseにしてもなぜかここを通る
 	if (!snat_done) {
+		//cilium_dbg(ctx, 69, 69, 18); // yama_debug bpf_masq enableの時だけ通るが、bpf_masq off で enable_nodeport をonにしても通らない が、この先コメントアウトしても通信には影響なし
 		ctx_store_meta(ctx, CB_CLUSTER_ID_EGRESS, cluster_id);
 		ret = tail_call_internal(ctx, CILIUM_CALL_IPV4_NODEPORT_SNAT_FWD,
 					 ext_err);

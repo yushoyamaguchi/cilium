@@ -1144,6 +1144,14 @@ static __always_inline int __lb4_rev_nat(struct __ctx_buff *ctx, int l3_off, int
 	}
 #endif
 
+	if (nat->address == bpf_htonl(0xAC150000) ) {
+		cilium_dbg(ctx, 69, 69, 21); // yama_debug
+	}
+
+	if (nat->address == bpf_htonl(0xAC120002) || nat->address == bpf_htonl(0xAC120003) || nat->address == bpf_htonl(0xAC120004) ) {
+		cilium_dbg(ctx, 69, 69, 22); // yama_debug 空振り やっぱりここまできてるケースは正しいアドレスにdsrされてる
+	}	
+
 	ret = ctx_store_bytes(ctx, l3_off + offsetof(struct iphdr, saddr),
 			      &nat->address, 4, 0);
 	if (IS_ERR(ret))
