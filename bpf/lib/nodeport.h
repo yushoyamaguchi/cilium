@@ -2104,7 +2104,7 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 	dsr_entry = nodeport_dsr_lookup_v4_nat_entry(&dsr_tuple);
 	if (dsr_entry){
 		if(dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
-			cilium_dbg(ctx, 69, 69, 4); 
+			//cilium_dbg(ctx, 69, 69, 4); //yama_debug
 		}
 		if (dsr_entry->nat_info.address == bpf_htonl(0xAC120002) || dsr_entry->nat_info.address == bpf_htonl(0xAC120003) || dsr_entry->nat_info.address == bpf_htonl(0xAC120004) ) {
 			cilium_dbg(ctx, 69, 69, 5); // yama_debug 空振り ここで不適なアドレスに変換されてるわけではない
@@ -2835,9 +2835,15 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
+		
 
 	has_l4_header = ipv4_has_l4_header(ip4);
 	is_fragment = ipv4_is_fragment(ip4);
+
+	if (ip4->daddr == bpf_htonl(0xAC120001)) {
+		cilium_dbg(ctx, 69, 69, 33); //yama_debug
+	}
+
 
 	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, &l4_off, &tuple);
 	tuple_ptr = &tuple;
@@ -2849,7 +2855,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	dsr_entry = nodeport_dsr_lookup_v4_nat_entry(&dsr_tuple2);
 	if (dsr_entry) {
 		if (dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
-			// cilium_dbg(ctx, 69, 69, 113); // yama_debug 下のやつとセットだった
+			cilium_dbg(ctx, 69, 69, 113); // yama_debug 下のやつとセットだった
 		}
 	}
 
@@ -2977,6 +2983,14 @@ __handle_nat_fwd_ipv4(struct __ctx_buff *ctx, __u32 cluster_id __maybe_unused,
 {
 	bool snat_done = false;
 	int ret;
+	struct iphdr *ip4;
+	void *data, *data_end;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 69, 32); //yama_debug
+		}
+	}
 
 	//cilium_dbg(ctx, 69, 69, 16);  // yama_debug ここは nodeportもbpf_masqもdisableでも通る
 
@@ -3046,5 +3060,160 @@ int tail_handle_nat_fwd_ipv4(struct __ctx_buff *ctx)
 	return ret;
 }
 #endif /* ENABLE_IPV4 */
+
+#ifdef ENABLE_HEALTH_CHECK
+static __always_inline int
+health_encap_v4(struct __ctx_buff *ctx, __u32 tunnel_ep,
+		__u32 seclabel)
+{
+	__u32 key_size = TUNNEL_KEY_WITHOUT_SRC_IP;
+	struct bpf_tunnel_key key;
+
+	/* When encapsulating, a packet originating from the local
+	 * host is being considered as a packet from a remote node
+	 * as it is being received.
+	 */
+	memset(&key, 0, sizeof(key));
+	key.tunnel_id = get_tunnel_id(seclabel == HOST_ID ? LOCAL_NODE_ID : seclabel);
+	key.remote_ipv4 = bpf_htonl(tunnel_ep);
+	key.tunnel_ttl = IPDEFTTL;
+
+	if (unlikely(ctx_set_tunnel_key(ctx, &key, key_size,
+					BPF_F_ZERO_CSUM_TX) < 0))
+		return DROP_WRITE_ERROR;
+	return 0;
+}
+
+static __always_inline int
+health_encap_v6(struct __ctx_buff *ctx, const union v6addr *tunnel_ep,
+		__u32 seclabel)
+{
+	__u32 key_size = TUNNEL_KEY_WITHOUT_SRC_IP;
+	struct bpf_tunnel_key key;
+
+	memset(&key, 0, sizeof(key));
+	key.tunnel_id = get_tunnel_id(seclabel == HOST_ID ? LOCAL_NODE_ID : seclabel);
+	key.remote_ipv6[0] = tunnel_ep->p1;
+	key.remote_ipv6[1] = tunnel_ep->p2;
+	key.remote_ipv6[2] = tunnel_ep->p3;
+	key.remote_ipv6[3] = tunnel_ep->p4;
+	key.tunnel_ttl = IPDEFTTL;
+
+	if (unlikely(ctx_set_tunnel_key(ctx, &key, key_size,
+					BPF_F_ZERO_CSUM_TX |
+					BPF_F_TUNINFO_IPV6) < 0))
+		return DROP_WRITE_ERROR;
+	return 0;
+}
+
+static __always_inline int
+lb_handle_health(struct __ctx_buff *ctx __maybe_unused, __be16 proto)
+{
+	void *data __maybe_unused, *data_end __maybe_unused;
+	__sock_cookie key __maybe_unused;
+	int ret __maybe_unused;
+
+	if ((ctx->mark & MARK_MAGIC_HEALTH_IPIP_DONE) ==
+	    MARK_MAGIC_HEALTH_IPIP_DONE)
+		return CTX_ACT_OK;
+
+	switch (proto) {
+#if defined(ENABLE_IPV4) && DSR_ENCAP_MODE == DSR_ENCAP_IPIP
+	case bpf_htons(ETH_P_IP): {
+		struct lb4_health *val;
+
+		key = get_socket_cookie(ctx);
+		val = map_lookup_elem(&LB4_HEALTH_MAP, &key);
+		if (!val)
+			return CTX_ACT_OK;
+		ret = health_encap_v4(ctx, val->peer.address, 0);
+		if (ret != 0)
+			return ret;
+		ctx->mark |= MARK_MAGIC_HEALTH_IPIP_DONE;
+		return ctx_redirect(ctx, ENCAP4_IFINDEX, 0);
+	}
+#endif
+#if defined(ENABLE_IPV6) && DSR_ENCAP_MODE == DSR_ENCAP_IPIP
+	case bpf_htons(ETH_P_IPV6): {
+		struct lb6_health *val;
+
+		key = get_socket_cookie(ctx);
+		val = map_lookup_elem(&LB6_HEALTH_MAP, &key);
+		if (!val)
+			return CTX_ACT_OK;
+		ret = health_encap_v6(ctx, &val->peer.address, 0);
+		if (ret != 0)
+			return ret;
+		ctx->mark |= MARK_MAGIC_HEALTH_IPIP_DONE;
+		return ctx_redirect(ctx, ENCAP6_IFINDEX, 0);
+	}
+#endif
+	default:
+		return CTX_ACT_OK;
+	}
+}
+#endif /* ENABLE_HEALTH_CHECK */
+
+/* handle_nat_fwd() handles revDNAT, fib_lookup_redirect, and bpf_snat for
+ * nodeport. If revdnat_only is set to true, fib_lookup and bpf_snat are
+ * skipped. The typical use case of handle_nat_fwd(revdnat_only=true) is for
+ * handling reply traffic that requires revDNAT prior to wireguard/IPsec
+ * encryption.
+ */
+static __always_inline int
+handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __be16 proto,
+	       bool revdnat_only, struct trace_ctx *trace __maybe_unused,
+	       __s8 *ext_err __maybe_unused)
+{
+	int ret = CTX_ACT_OK;
+	__u32 cb_nat_flags = 0;
+	struct iphdr *ip4;
+	void *data, *data_end;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 69, 31); //yama_debug
+		}
+	}
+
+	if (revdnat_only)
+		cb_nat_flags |= CB_NAT_FLAGS_REVDNAT_ONLY;
+
+	ctx_store_meta(ctx, CB_NAT_FLAGS, cb_nat_flags);
+	ctx_store_meta(ctx, CB_CLUSTER_ID_EGRESS, cluster_id);
+
+	switch (proto) {
+#ifdef ENABLE_IPV4
+	case bpf_htons(ETH_P_IP):
+		ret = invoke_traced_tailcall_if(__or4(__and(is_defined(ENABLE_IPV4),
+							    is_defined(ENABLE_IPV6)),
+						      __and(is_defined(ENABLE_HOST_FIREWALL),
+							    is_defined(IS_BPF_HOST)),
+						      __and(is_defined(ENABLE_CLUSTER_AWARE_ADDRESSING),
+							    is_defined(ENABLE_INTER_CLUSTER_SNAT)),
+						      __and(is_defined(ENABLE_EGRESS_GATEWAY_COMMON),
+							    is_defined(IS_BPF_HOST))),
+						CILIUM_CALL_IPV4_NODEPORT_NAT_FWD,
+						handle_nat_fwd_ipv4, trace, ext_err);
+		break;
+#endif /* ENABLE_IPV4 */
+#ifdef ENABLE_IPV6
+	case bpf_htons(ETH_P_IPV6):
+		ret = invoke_traced_tailcall_if(__or(__and(is_defined(ENABLE_IPV4),
+							   is_defined(ENABLE_IPV6)),
+						     __and(is_defined(ENABLE_HOST_FIREWALL),
+							   is_defined(IS_BPF_HOST))),
+						CILIUM_CALL_IPV6_NODEPORT_NAT_FWD,
+						handle_nat_fwd_ipv6, trace, ext_err);
+		break;
+#endif /* ENABLE_IPV6 */
+	default:
+		build_bug_on(!(NODEPORT_PORT_MIN_NAT <= NODEPORT_PORT_MAX_NAT));
+		build_bug_on(!(NODEPORT_PORT_MIN     <= NODEPORT_PORT_MAX));
+		build_bug_on(!(NODEPORT_PORT_MAX     <= NODEPORT_PORT_MIN_NAT));
+		break;
+	}
+	return ret;
+}
 
 #endif /* ENABLE_NODEPORT */
