@@ -1145,7 +1145,7 @@ static __always_inline int __lb4_rev_nat(struct __ctx_buff *ctx, int l3_off, int
 #endif
 
 	if (nat->address == bpf_htonl(0xAC150000) ) {
-		cilium_dbg(ctx, 69, 69, 21); // yama_debug
+		//cilium_dbg(ctx, 69, 69, 21); // yama_debug
 	}
 
 	if (nat->address == bpf_htonl(0xAC120002) || nat->address == bpf_htonl(0xAC120003) || nat->address == bpf_htonl(0xAC120004) ) {

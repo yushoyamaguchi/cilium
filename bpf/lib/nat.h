@@ -487,8 +487,8 @@ snat_v4_create_dsr(struct __ctx_buff *ctx, const struct ipv4_ct_tuple *tuple,
 	struct ipv4_nat_entry state = {};
 	int ret;
 
-	if (to_saddr == bpf_htonl(0xAC150000)) {
-		cilium_dbg(ctx, 69, 69, 8);
+	if (to_saddr == bpf_htonl(0xAC1500FF)) {
+		cilium_dbg(ctx, 69, 69, 8); // yama_debug
 	}
 
 	build_bug_on(sizeof(struct ipv4_nat_entry) > 64);

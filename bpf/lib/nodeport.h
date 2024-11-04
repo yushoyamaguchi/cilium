@@ -2435,7 +2435,7 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 	dsr_entry = nodeport_dsr_lookup_v4_nat_entry(&dsr_tuple);
 	if (dsr_entry){
 		if(dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
-			cilium_dbg(ctx, 69, 69, 4); 
+			//cilium_dbg(ctx, 69, 69, 4); //yama_debug
 		}
 		if (dsr_entry->nat_info.address == bpf_htonl(0xAC120002) || dsr_entry->nat_info.address == bpf_htonl(0xAC120003) || dsr_entry->nat_info.address == bpf_htonl(0xAC120004) ) {
 			cilium_dbg(ctx, 69, 69, 5); // yama_debug 空振り ここで不適なアドレスに変換されてるわけではない
@@ -3166,9 +3166,15 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
+		
 
 	has_l4_header = ipv4_has_l4_header(ip4);
 	is_fragment = ipv4_is_fragment(ip4);
+
+	if (ip4->daddr == bpf_htonl(0xAC120001)) {
+		cilium_dbg(ctx, 69, 69, 33); //yama_debug
+	}
+
 
 	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, &l4_off, &tuple);
 	tuple_ptr = &tuple;
@@ -3180,7 +3186,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	dsr_entry = nodeport_dsr_lookup_v4_nat_entry(&dsr_tuple2);
 	if (dsr_entry) {
 		if (dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
-			// cilium_dbg(ctx, 69, 69, 113); // yama_debug 下のやつとセットだった
+			cilium_dbg(ctx, 69, 69, 113); // yama_debug 下のやつとセットだった
 		}
 	}
 
@@ -3308,6 +3314,14 @@ __handle_nat_fwd_ipv4(struct __ctx_buff *ctx, __u32 cluster_id __maybe_unused,
 {
 	bool snat_done = false;
 	int ret;
+	struct iphdr *ip4;
+	void *data, *data_end;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 69, 32); //yama_debug
+		}
+	}
 
 	//cilium_dbg(ctx, 69, 69, 16);  // yama_debug ここは nodeportもbpf_masqもdisableでも通る
 
@@ -3485,6 +3499,14 @@ handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __be16 proto,
 {
 	int ret = CTX_ACT_OK;
 	__u32 cb_nat_flags = 0;
+	struct iphdr *ip4;
+	void *data, *data_end;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 69, 31); //yama_debug
+		}
+	}
 
 	if (revdnat_only)
 		cb_nat_flags |= CB_NAT_FLAGS_REVDNAT_ONLY;

@@ -1390,8 +1390,16 @@ int cil_to_netdev(struct __ctx_buff *ctx __maybe_unused)
 	__u32 __maybe_unused vlan_id;
 	int ret = CTX_ACT_OK;
 	__s8 ext_err = 0;
+	struct iphdr *ip4;
+	void *data, *data_end;
 
 	bpf_clear_meta(ctx);
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 69, 30); //yama_debug
+		}
+	}
 
 	if (magic == MARK_MAGIC_HOST || magic == MARK_MAGIC_OVERLAY)
 		src_sec_identity = HOST_ID;
