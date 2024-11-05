@@ -1398,6 +1398,7 @@ int cil_to_netdev(struct __ctx_buff *ctx __maybe_unused)
 	if (revalidate_data(ctx, &data, &data_end, &ip4)){
 		if (ip4->daddr == bpf_htonl(0xAC120001)) {
 			cilium_dbg(ctx, 69, 69, 30); //yama_debug
+			cilium_dbg(ctx, 69, 66, bpf_ntohl(ip4->saddr)); //yama_debug dsr失敗時はこのcil_from_netdevの時点でsaddrがnodeのIPになっている
 		}
 	}
 

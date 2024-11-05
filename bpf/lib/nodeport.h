@@ -2382,7 +2382,7 @@ create_ct:
 
 static __always_inline struct lb4_reverse_nat *
 nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
-				struct ipv4_ct_tuple *tuple)
+				struct ipv4_ct_tuple *tuple, int is_the_dst)
 {
 	struct ipv4_nat_entry *dsr_entry __maybe_unused;
 	struct ipv4_ct_tuple dsr_tuple __maybe_unused;
@@ -2390,7 +2390,7 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 	__u16 rev_nat_index = 0;
 	bool has_nodeport_egress_entry;
 
-	has_nodeport_egress_entry = ct_has_nodeport_egress_entry4(get_ct_map4(tuple), tuple, &rev_nat_index, is_defined(ENABLE_DSR));
+	has_nodeport_egress_entry = ct_has_nodeport_egress_entry4(ctx, get_ct_map4(tuple), tuple, &rev_nat_index, is_defined(ENABLE_DSR), is_the_dst);
 #ifdef ENABLE_DSR	
 	dsr_tuple2 = *tuple;
 	dsr_tuple2.flags = NAT_DIR_EGRESS;
@@ -2400,16 +2400,14 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 	if (dsr_entry) {
 		if (dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
 			//cilium_dbg(ctx, 69, 69, 11); // yama_debug ここは表示されても下のは表示されない
-			if (!has_nodeport_egress_entry){
-				cilium_dbg(ctx, 69, 69, 12); // yama_debug 空振り ct_has_nodeport_egress_entry4() で弾かれてるわけではない
-				// (そもそもnodeport_rev_dnat_get_info_ipv4に入ってない)
-			}
 		}
 	}
 #endif /* ENABLE_DSR */
 
 	if (!has_nodeport_egress_entry){
-		//cilium_dbg(ctx, 69, 69, 10); // yama_debug ここで弾かれてる？ ここに当てはまるの多すぎてわからん... これから調べる
+		if (is_the_dst){
+			cilium_dbg(ctx, 69, 69, 10); // yama_debug dsr失敗時ここで弾かれてる
+		}
 		return NULL;
 	}
 
@@ -2441,6 +2439,8 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 			cilium_dbg(ctx, 69, 69, 5); // yama_debug 空振り ここで不適なアドレスに変換されてるわけではない
 		}
 		return &dsr_entry->nat_info;
+	} else if (is_the_dst == 1){
+		cilium_dbg(ctx, 69, 69, 11); // yama_debug
 	}
 #endif
 
@@ -3163,6 +3163,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	struct ipv4_ct_tuple dsr_tuple2 __maybe_unused;
 	struct ipv4_nat_entry *dsr_entry __maybe_unused;
 	struct ipv4_ct_tuple *tuple_ptr;
+	int is_the_dst = 0;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -3172,11 +3173,16 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	is_fragment = ipv4_is_fragment(ip4);
 
 	if (ip4->daddr == bpf_htonl(0xAC120001)) {
+		is_the_dst = 1;
 		cilium_dbg(ctx, 69, 69, 33); //yama_debug
 	}
 
 
 	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, &l4_off, &tuple);
+	if (is_the_dst == 1) {
+		cilium_dbg(ctx, 69, 67, bpf_ntohl(ip4->daddr)); //yama_debug
+		cilium_dbg(ctx, 69, 67, bpf_ntohl(ip4->saddr)); //yama_debug dsr失敗時はここのipヘッダのsaddrがnodeのものになってる
+	}
 	tuple_ptr = &tuple;
 
 	dsr_tuple2 = *tuple_ptr;
@@ -3188,6 +3194,8 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 		if (dsr_entry->nat_info.address == bpf_htonl(0xAC150000)){
 			cilium_dbg(ctx, 69, 69, 113); // yama_debug 下のやつとセットだった
 		}
+	} else if (is_the_dst == 1) {
+		cilium_dbg(ctx, 69, 69, 134); // yama_debug dsr失敗するパケットはここを通る
 	}
 
 	if (ret < 0) {
@@ -3203,9 +3211,13 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 		}
 	}
 
-	nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tuple);
-	if (!nat_info)
+	nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tuple, is_the_dst);
+	if (!nat_info){
+		if (is_the_dst==1) {
+			cilium_dbg(ctx, 69, 69, 135); //yama_debug dsr失敗するパケットはここを通る
+		}
 		return CTX_ACT_OK;
+	}
 
 #if defined(IS_BPF_HOST) && !defined(ENABLE_SKIP_FIB)
 	if (revdnat_only)

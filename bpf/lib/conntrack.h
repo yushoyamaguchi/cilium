@@ -1110,21 +1110,34 @@ __ct_has_nodeport_egress_entry(const struct ct_entry *entry,
  * backend => client belongs to the LB flow we can query the CT_EGRESS entry.
  */
 static __always_inline bool
-ct_has_nodeport_egress_entry4(const void *map,
+ct_has_nodeport_egress_entry4(struct __ctx_buff *ctx, const void *map,
 			      struct ipv4_ct_tuple *ingress_tuple,
-			      __u16 *rev_nat_index, bool check_dsr)
+			      __u16 *rev_nat_index, bool check_dsr, int is_the_dst)
 {
 	__u8 prev_flags = ingress_tuple->flags;
 	struct ct_entry *entry;
+	bool ret;
 
 	ingress_tuple->flags = TUPLE_F_OUT;
 	entry = map_lookup_elem(map, ingress_tuple);
+	if (is_the_dst == 1){
+		cilium_dbg(ctx, 69, 68, bpf_ntohl(ingress_tuple->daddr)); //yama_debug
+		cilium_dbg(ctx, 69, 68, bpf_ntohl(ingress_tuple->saddr)); //yama_debug ここがLBバックエンドのpodのIPにならなきゃいけないのに、dsr失敗時はnodeのIPになっている
+	}
 	ingress_tuple->flags = prev_flags;
 
-	if (!entry)
+	if (!entry){
+		if (is_the_dst == 1){
+			cilium_dbg(ctx, 69, 69, 12); //yama_debug dsr失敗時はここを通っている
+		}
 		return false;
+	}
 
-	return __ct_has_nodeport_egress_entry(entry, rev_nat_index, check_dsr);
+	ret = __ct_has_nodeport_egress_entry(entry, rev_nat_index, check_dsr);
+	if (!ret && is_the_dst == 1){
+		cilium_dbg(ctx, 69, 69, 13); //yama_debug 空振り
+	}
+	return ret;
 }
 
 static __always_inline bool

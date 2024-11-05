@@ -1985,8 +1985,8 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 		/* Needed for hostport support, until
 		 * https://github.com/cilium/cilium/issues/32897 is fixed.
 		 */
-		ct_state_new.node_port = ct_has_nodeport_egress_entry4(get_ct_map4(tuple),
-								       tuple, NULL, false);
+		ct_state_new.node_port = ct_has_nodeport_egress_entry4(ctx, get_ct_map4(tuple),
+								       tuple, NULL, false, 0);
 #endif /* ENABLE_NODEPORT && ENABLE_IPSEC */
 		ct_state_new.src_sec_id = src_label;
 		ct_state_new.from_tunnel = from_tunnel;
