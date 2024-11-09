@@ -71,6 +71,8 @@ __encap_and_redirect_with_nodeid(struct __ctx_buff *ctx, __u32 src_ip __maybe_un
 	if (ret != CTX_ACT_REDIRECT)
 		return ret;
 
+	cilium_dbg(ctx, 69, 1, ifindex); //yama_debug	
+
 	return ctx_redirect(ctx, ifindex, 0);
 }
 
