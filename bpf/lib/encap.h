@@ -64,12 +64,26 @@ __encap_and_redirect_with_nodeid(struct __ctx_buff *ctx, __u32 src_ip __maybe_un
 {
 	int ifindex;
 	int ret = 0;
+	struct iphdr *ip4;
+	void *data, *data_end;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 70, 2, 1); //yama_debug dsr有効時はここに入らない
+		}
+	}
 
 	ret = __encap_with_nodeid(ctx, src_ip, 0, tunnel_endpoint, seclabel, dstid,
 				  vni, trace->reason, trace->monitor,
 				  &ifindex);
 	if (ret != CTX_ACT_REDIRECT)
 		return ret;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 1, ifindex); //yama_debug dsr有効時はここに入らない 無効時はここに入る
+		}
+	}
 
 	return ctx_redirect(ctx, ifindex, 0);
 }

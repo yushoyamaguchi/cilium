@@ -581,6 +581,14 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 	bool decrypted;
 	__u16 proto;
 	int ret;
+	struct iphdr *ip4;
+	void *data, *data_end;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 2, 1); //yama_debug dsr時は通らない
+		}
+	}
 
 #ifndef ENABLE_HIGH_SCALE_IPCACHE
 	/* preserve skb->cb for hs-ipcache, from-netdev is passing info */
@@ -752,6 +760,14 @@ int cil_to_overlay(struct __ctx_buff *ctx)
 	__u32 cluster_id __maybe_unused = 0;
 	__be16 __maybe_unused proto = 0;
 	__s8 ext_err = 0;
+	struct iphdr *ip4;
+	void *data, *data_end;
+
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 69, 2, 2); //yama_debug dsr時は通らない
+		}
+	}
 
 	/* Load the ethertype just once: */
 	validate_ethertype(ctx, &proto);

@@ -903,6 +903,10 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
 
+	if (ip4->daddr == bpf_htonl(0xAC120001)) {
+		//cilium_dbg(ctx, 70, 1, 1); //yama_debug dsr有効時でもここは通る
+	}	
+
 #ifdef ENABLE_PER_PACKET_LB
 	/* Restore ct_state from per packet lb handling in the previous tail call. */
 	lb4_ctx_restore_state(ctx, &ct_state_new, &proxy_port, &cluster_id, true);
@@ -1307,6 +1311,9 @@ to_host:
 #endif
 
 pass_to_stack:
+	if (ip4->daddr == bpf_htonl(0xAC120001)) {
+		// cilium_dbg(ctx, 70, 1, 13); //yama_debug dsr有効時もここにはきてる (bpf_masqをどっちにしても)
+	}
 #ifdef ENABLE_ROUTING
 	ret = ipv4_l3(ctx, ETH_HLEN, NULL, (__u8 *)&router_mac.addr, ip4);
 	if (unlikely(ret != CTX_ACT_OK))
@@ -1350,8 +1357,15 @@ int tail_handle_ipv4_cont(struct __ctx_buff *ctx)
 {
 	__u32 dst_sec_identity = 0;
 	__s8 ext_err = 0;
+	struct iphdr *ip4;
+	void *data, *data_end;
 
 	int ret = handle_ipv4_from_lxc(ctx, &dst_sec_identity, &ext_err);
+	if (revalidate_data(ctx, &data, &data_end, &ip4)){
+		if (ip4->daddr == bpf_htonl(0xAC120001)) {
+			cilium_dbg(ctx, 70, 2, ret); //yama_debug retは0だった(dsr有効/bpf_masq はどちらでも)
+		}
+	}
 
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, SECLABEL_IPV4, dst_sec_identity,
