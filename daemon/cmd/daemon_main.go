@@ -1011,6 +1011,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableBGPControlPlaneStatusReport, true, "Enable the BGP control plane status reporting")
 	option.BindEnv(vp, option.EnableBGPControlPlaneStatusReport)
 
+	flags.String(option.BGPRouterIDAllocationMode, "", "BGP router-id allcation mode.")
+	option.BindEnv(vp, option.BGPRouterIDAllocationMode)
+
 	flags.Bool(option.EnablePMTUDiscovery, false, "Enable path MTU discovery to send ICMP fragmentation-needed replies to the client")
 	option.BindEnv(vp, option.EnablePMTUDiscovery)
 
