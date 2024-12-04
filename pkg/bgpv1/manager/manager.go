@@ -1036,6 +1036,10 @@ func getLocalASN(config *v2alpha1api.CiliumBGPNodeInstance) (int64, error) {
 // be returned. Otherwise, the router ID will be resolved from the ciliumnode annotations. If the router ID is not
 // defined in the annotations, the node IP from cilium node will be returned.
 func getRouterID(config *v2alpha1api.CiliumBGPNodeInstance, ciliumNode *v2api.CiliumNode, asn int64) (string, error) {
+	// yama_debug ここでrouterIDを取得している
+	bgpRouterIDAllocationMode := option.Config.BGPRouterIDAllocationMode
+	fmt.Println("yama_debug: bgpRouterIDAllocationMode: ", bgpRouterIDAllocationMode)
+
 	if config.RouterID != nil {
 		return *config.RouterID, nil
 	}
