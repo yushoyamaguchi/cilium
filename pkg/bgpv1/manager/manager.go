@@ -1072,7 +1072,6 @@ func getRouterID(config *v2alpha1api.CiliumBGPNodeInstance, ciliumNode *v2api.Ci
 	// yama_debug ここでrouterIDを取得している
 	bgpRouterIDAllocationMode := option.Config.BGPRouterIDAllocationMode
 	fmt.Println("yama_debug: bgpRouterIDAllocationMode: ", bgpRouterIDAllocationMode)
-	fmt.Println("yama_debug: HostDeviceName: ", defaults.HostDevice)
 	if config.RouterID != nil {
 		return *config.RouterID, nil
 	}
