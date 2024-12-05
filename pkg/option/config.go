@@ -1258,6 +1258,9 @@ const (
 
 	// PprofPortAgent is the default value for pprof in the agent
 	PprofPortAgent = 6060
+
+	// Default BGP router-id allocation mode
+	BGPRouterIDAllocationModeDefault = "default"
 )
 
 // getEnvName returns the environment variable to be used for the given option name.

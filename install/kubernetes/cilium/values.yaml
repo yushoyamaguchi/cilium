@@ -462,7 +462,7 @@ bgpControlPlane:
   # -- BGP router-id allocation settings
   routerIDAllocation:
     # -- router-id allocation mode
-    mode: ""
+    mode: "default"
 pmtuDiscovery:
   # -- Enable path MTU discovery to send ICMP fragmentation-needed replies to
   # the client.
