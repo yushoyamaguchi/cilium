@@ -271,7 +271,7 @@
    * - :spelling:ignore:`bgpControlPlane`
      - This feature set enables virtual BGP routers to be created via CiliumBGPPeeringPolicy CRDs.
      - object
-     - ``{"enabled":false,"secretsNamespace":{"create":false,"name":"kube-system"},"statusReport":{"enabled":true}}``
+     - ``{"enabled":false,"secretsNamespace":{"create":false,"name":"kube-system"},"statusReport":{"enabled":true},"routerIDAllocation":{"mode":"default"}}``
    * - :spelling:ignore:`bgpControlPlane.enabled`
      - Enables the BGP control plane.
      - bool
@@ -296,6 +296,14 @@
      - Enable/Disable BGPv2 status reporting It is recommended to enable status reporting in general, but if you have any issue such as high API server load, you can disable it by setting this to false.
      - bool
      - ``true``
+   * - :spelling:ignore:`bgpControlPlane.routerIDAllocation`
+     - This feature enables to designate the mode in which router IDs are allocated.
+     - object
+     - ``{"mode":"default"}``
+   * - :spelling:ignore:`bgpControlPlane.routerIDAllocation.mode`
+     - RouterIDAllocationMode is the mode in which router IDs are allocated.
+     - string
+     - ``"default"``
    * - :spelling:ignore:`bpf.authMapMax`
      - Configure the maximum number of entries in auth map.
      - int
