@@ -478,6 +478,14 @@
             }
           },
           "type": "object"
+        },
+        "routerIDAllocation": {
+          "properties": {
+            "mode": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         }
       },
       "type": "object"
