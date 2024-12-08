@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
 	"github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/cilium/cilium/pkg/bgpv1/manager/reconciler"
 	"github.com/cilium/cilium/pkg/bgpv1/manager/reconcilerv2"
 	"github.com/cilium/cilium/pkg/bgpv1/types"
+	"github.com/cilium/cilium/pkg/defaults"
 	v2api "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	v2alpha1api "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
 	"github.com/cilium/cilium/pkg/lock"
@@ -1032,6 +1035,37 @@ func getLocalASN(config *v2alpha1api.CiliumBGPNodeInstance) (int64, error) {
 	return 0, fmt.Errorf("missing ASN in desired config")
 }
 
+// macToRouterID converts the lower 4 bytes of a MAC address to a router ID
+func macToRouterID(mac net.HardwareAddr) string {
+	// Use the last 4 bytes to generate the router ID
+	return fmt.Sprintf("%d.%d.%d.%d", mac[len(mac)-4], mac[len(mac)-3], mac[len(mac)-2], mac[len(mac)-1])
+}
+
+// calcRouterIDFromMacAddress calculates a router ID from the lower 4 bytes of the MAC address
+func calcRouterIDFromMacAddress() (string, error) {
+	// Use cilium_host device
+	hostDeviceName := defaults.HostDevice
+
+	// Retrieve the network link for the host device
+	link, err := netlink.LinkByName(hostDeviceName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get device %s: %w", hostDeviceName, err)
+	}
+
+	// Get the MAC address
+	mac := link.Attrs().HardwareAddr
+	if mac == nil {
+		return "", fmt.Errorf("no MAC address found for device %s", hostDeviceName)
+	}
+
+	// Ensure the MAC address is at least 4 bytes long
+	if len(mac) < 4 {
+		return "", fmt.Errorf("MAC address too short: %v", mac)
+	}
+	routerID := macToRouterID(mac)
+	return routerID, nil
+}
+
 // getRouterID returns the router ID for the given ASN. If the router ID is defined in the desired config, it will
 // be returned. Otherwise, the router ID will be resolved from the ciliumnode annotations. If the router ID is not
 // defined in the annotations, the node IP from cilium node will be returned.
@@ -1046,12 +1080,20 @@ func getRouterID(config *v2alpha1api.CiliumBGPNodeInstance, ciliumNode *v2api.Ci
 		return "", fmt.Errorf("failed to parse Node annotations for instance %v: %w", config.Name, err)
 	}
 
+	// check if the router ID allocation mode is set to default
+	isDefault := option.Config.BGPRouterIDAllocationMode == option.BGPRouterIDAllocationModeDefault
+
 	routerID, err := annoMap.ResolveRouterID(asn)
 	if err != nil {
-		if nodeIP := ciliumNode.GetIP(false); nodeIP == nil {
-			return "", fmt.Errorf("failed to get CiliumNode IP %v: %w", nodeIP, err)
-		} else {
+		if !isDefault {
+			// TODO: Implement other router ID allocation modes
+			return "", fmt.Errorf("Allocation methods other than default are not supported: %w", err)
+		} else if nodeIP := ciliumNode.GetIP(false); nodeIP != nil {
 			routerID = nodeIP.String()
+		} else if routerIDFromMacString, _ := calcRouterIDFromMacAddress(); routerIDFromMacString != "" {
+			routerID = routerIDFromMacString
+		} else {
+			return "", fmt.Errorf("failed to allocate router ID for instance %v: %w", config.Name, err)
 		}
 	}
 

@@ -1145,6 +1145,9 @@ const (
 	// EnableEndpointLockdownOnPolicyOverflow enables endpoint lockdown when an endpoint's
 	// policy map overflows.
 	EnableEndpointLockdownOnPolicyOverflow = "enable-endpoint-lockdown-on-policy-overflow"
+
+	// Default BGP router-id allocation mode
+	BGPRouterIDAllocationModeDefault = "default"
 )
 
 // Default string arguments
