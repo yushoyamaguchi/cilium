@@ -889,6 +889,12 @@ func (m *BGPRouterManager) registerBGPInstance(ctx context.Context,
 		return err
 	}
 
+	for _, i := range m.BGPInstances {
+		if i.Global.ASN == uint32(localASN) && i.Global.RouterID == routerID {
+			return fmt.Errorf("BGP instance with RouterID %s in ASN %d already exists", routerID, localASN)
+		}
+	}
+
 	l = l.WithFields(logrus.Fields{
 		types.LocalASNLogField:   localASN,
 		types.ListenPortLogField: localPort,
