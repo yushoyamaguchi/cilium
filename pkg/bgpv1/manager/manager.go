@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
@@ -854,6 +855,9 @@ func (m *BGPRouterManager) registerV2(ctx context.Context, rd *reconcileDiffV2) 
 		if rErr := m.registerBGPInstance(ctx, config, rd.ciliumNode); rErr != nil {
 			// we'll log the error and attempt to register the next instance.
 			m.Logger.WithField(types.InstanceLogField, name).WithError(rErr).Debug("Error registering new BGP instance")
+			if strings.Contains(rErr.Error(), "BGP instance RouterID duplication") {
+				break
+			}
 			instancesWithError = append(instancesWithError, name)
 			lastErr = rErr
 		}
@@ -891,7 +895,7 @@ func (m *BGPRouterManager) registerBGPInstance(ctx context.Context,
 
 	for _, i := range m.BGPInstances {
 		if i.Global.ASN == uint32(localASN) && i.Global.RouterID == routerID {
-			return fmt.Errorf("BGP instance with RouterID %s in ASN %d already exists", routerID, localASN)
+			return fmt.Errorf("BGP instance RouterID duplication : %s in ASN %d already exists", routerID, localASN)
 		}
 	}
 
