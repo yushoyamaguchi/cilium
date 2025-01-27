@@ -58,6 +58,8 @@
 
 #define __invoke_traced_tailcall_if_0(NAME, FUNC, TRACE, EXT_ERR)	\
 	FUNC(ctx, TRACE, EXT_ERR)
+#define __invoke_traced_tailcall_b_if_0(NAME, FUNC, TRACE, EXT_ERR, IS_OVERLAY)	\
+	FUNC(ctx, TRACE, EXT_ERR, IS_OVERLAY)
 #define __invoke_traced_tailcall_if_1(NAME, FUNC, TRACE, EXT_ERR)	\
 	({								\
 		tail_call_internal(ctx, NAME, EXT_ERR);			\
@@ -65,5 +67,8 @@
 #define invoke_traced_tailcall_if(COND, NAME, FUNC, TRACE, EXT_ERR)	\
 	__eval(__invoke_traced_tailcall_if_, COND)(NAME, FUNC, TRACE,	\
 						   EXT_ERR)
+#define invoke_traced_tailcall_if2(COND, NAME, FUNC, TRACE, EXT_ERR, IS_OVERLAY)	\
+	__eval(__invoke_traced_tailcall_b_if_, COND)(NAME, FUNC, TRACE,	\
+						   EXT_ERR, IS_OVERLAY)
 
 #endif /* TAILCALL_H */
