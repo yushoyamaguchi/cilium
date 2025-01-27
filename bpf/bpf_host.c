@@ -1619,7 +1619,7 @@ skip_egress_gateway:
 		 * handle_nat_fwd tail calls in the majority of cases,
 		 * so control might never return to this program.
 		 */
-		ret = handle_nat_fwd(ctx, 0, proto, false, &trace, &ext_err);
+		ret = handle_nat_fwd(ctx, 0, proto, false, &trace, &ext_err, 0);
 		if (ret == CTX_ACT_REDIRECT)
 			return ret;
 	}
@@ -1702,7 +1702,7 @@ int cil_to_host(struct __ctx_buff *ctx)
 	 * might never return to this program. Since IPsec is not compatible
 	 * iwth Host Firewall, this won't be an issue.
 	 */
-	ret = handle_nat_fwd(ctx, 0, proto, true, &trace, &ext_err);
+	ret = handle_nat_fwd(ctx, 0, proto, true, &trace, &ext_err, 0);
 	if (IS_ERR(ret))
 		goto out;
 

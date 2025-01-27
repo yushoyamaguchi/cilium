@@ -544,6 +544,20 @@ handle_nat_fwd_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	return __handle_nat_fwd_ipv4(ctx, cluster_id, revdnat_only, trace, ext_err);
 }
 
+static __always_inline int
+handle_nat_fwd_ipv4_2(struct __ctx_buff *ctx, struct trace_ctx *trace,
+		    __s8 *ext_err, int is_overlay)
+{
+	__u32 cb_nat_flags = ctx_load_and_clear_meta(ctx, CB_NAT_FLAGS);
+	bool revdnat_only = cb_nat_flags & CB_NAT_FLAGS_REVDNAT_ONLY;
+	__u32 cluster_id = ctx_load_and_clear_meta(ctx, CB_CLUSTER_ID_EGRESS);
+	if (is_overlay){
+		cilium_dbg(ctx, 69, 69, 1);
+	}
+
+	return __handle_nat_fwd_ipv4(ctx, cluster_id, revdnat_only, trace, ext_err);
+}
+
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV4_NODEPORT_NAT_FWD)
 static __always_inline
 int tail_handle_nat_fwd_ipv4(struct __ctx_buff *ctx)
@@ -678,7 +692,7 @@ lb_handle_health(struct __ctx_buff *ctx __maybe_unused, __be16 proto)
 static __always_inline int
 handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __be16 proto,
 	       bool revdnat_only, struct trace_ctx *trace __maybe_unused,
-	       __s8 *ext_err __maybe_unused)
+	       __s8 *ext_err __maybe_unused, int is_overlay)
 {
 	int ret = CTX_ACT_OK;
 	__u32 cb_nat_flags = 0;
@@ -692,7 +706,7 @@ handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __be16 proto,
 	switch (proto) {
 #ifdef ENABLE_IPV4
 	case bpf_htons(ETH_P_IP):
-		ret = invoke_traced_tailcall_if(__or4(__and(is_defined(ENABLE_IPV4),
+		ret = invoke_traced_tailcall_if2(__or4(__and(is_defined(ENABLE_IPV4),
 							    is_defined(ENABLE_IPV6)),
 						      __and(is_defined(ENABLE_HOST_FIREWALL),
 							    is_defined(IS_BPF_HOST)),
@@ -701,7 +715,7 @@ handle_nat_fwd(struct __ctx_buff *ctx, __u32 cluster_id, __be16 proto,
 						      __and(is_defined(ENABLE_EGRESS_GATEWAY_COMMON),
 							    is_defined(IS_BPF_HOST))),
 						CILIUM_CALL_IPV4_NODEPORT_NAT_FWD,
-						handle_nat_fwd_ipv4, trace, ext_err);
+						handle_nat_fwd_ipv4_2, trace, ext_err, is_overlay);
 		break;
 #endif /* ENABLE_IPV4 */
 #ifdef ENABLE_IPV6
