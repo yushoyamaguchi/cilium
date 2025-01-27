@@ -434,7 +434,7 @@ int tail_handle_snat_fwd_ipv4(struct __ctx_buff *ctx)
 static __always_inline int
 nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 			   bool revdnat_only __maybe_unused,
-			   struct trace_ctx *trace, __s8 *ext_err __maybe_unused)
+			   struct trace_ctx *trace, __s8 *ext_err __maybe_unused, int is_overlay)
 {
 	struct bpf_fib_lookup_padded fib_params __maybe_unused = {};
 	int ret, l3_off = ETH_HLEN, l4_off;
@@ -444,12 +444,21 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	void *data, *data_end;
 	bool has_l4_header, is_fragment;
 	struct iphdr *ip4;
+	int is_the_dst = 0;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
 
 	has_l4_header = ipv4_has_l4_header(ip4);
 	is_fragment = ipv4_is_fragment(ip4);
+
+	if (is_overlay) {
+		cilium_dbg(ctx, 69, 5, is_overlay); //yama_debug This code is reached.
+	}
+
+	if (ip4->daddr == bpf_htonl(0xAC150001)) {
+		is_the_dst = 1;
+	}
 
 	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, &l4_off, &tuple);
 	if (ret < 0) {
@@ -460,8 +469,14 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	}
 
 	nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tuple);
-	if (!nat_info)
+	/*if (!nat_info)
+		return CTX_ACT_OK;*/
+	if (!nat_info) {
+		if (is_the_dst) {
+			cilium_dbg(ctx, 69, 1, is_overlay); //yama_debug This code is reached only when cil_to_netdev call this function.
+		}
 		return CTX_ACT_OK;
+	}
 
 #if defined(IS_BPF_HOST) && !defined(ENABLE_SKIP_FIB)
 	if (revdnat_only)
@@ -507,12 +522,12 @@ skip_fib:
 
 static __always_inline int
 __handle_nat_fwd_ipv4(struct __ctx_buff *ctx, __u32 cluster_id __maybe_unused,
-		      bool revdnat_only, struct trace_ctx *trace, __s8 *ext_err)
+		      bool revdnat_only, struct trace_ctx *trace, __s8 *ext_err, int is_overlay)
 {
 	bool snat_done = false;
 	int ret;
 
-	ret = nodeport_rev_dnat_fwd_ipv4(ctx, &snat_done, revdnat_only, trace, ext_err);
+	ret = nodeport_rev_dnat_fwd_ipv4(ctx, &snat_done, revdnat_only, trace, ext_err, is_overlay);
 	if (ret != CTX_ACT_OK || revdnat_only)
 		return ret;
 
@@ -541,7 +556,7 @@ handle_nat_fwd_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	bool revdnat_only = cb_nat_flags & CB_NAT_FLAGS_REVDNAT_ONLY;
 	__u32 cluster_id = ctx_load_and_clear_meta(ctx, CB_CLUSTER_ID_EGRESS);
 
-	return __handle_nat_fwd_ipv4(ctx, cluster_id, revdnat_only, trace, ext_err);
+	return __handle_nat_fwd_ipv4(ctx, cluster_id, revdnat_only, trace, ext_err, -1);
 }
 
 static __always_inline int
@@ -551,11 +566,8 @@ handle_nat_fwd_ipv4_2(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	__u32 cb_nat_flags = ctx_load_and_clear_meta(ctx, CB_NAT_FLAGS);
 	bool revdnat_only = cb_nat_flags & CB_NAT_FLAGS_REVDNAT_ONLY;
 	__u32 cluster_id = ctx_load_and_clear_meta(ctx, CB_CLUSTER_ID_EGRESS);
-	if (is_overlay){
-		cilium_dbg(ctx, 69, 69, 1);
-	}
 
-	return __handle_nat_fwd_ipv4(ctx, cluster_id, revdnat_only, trace, ext_err);
+	return __handle_nat_fwd_ipv4(ctx, cluster_id, revdnat_only, trace, ext_err, is_overlay);
 }
 
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV4_NODEPORT_NAT_FWD)
