@@ -452,10 +452,6 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	has_l4_header = ipv4_has_l4_header(ip4);
 	is_fragment = ipv4_is_fragment(ip4);
 
-	if (is_overlay) {
-		cilium_dbg(ctx, 69, 5, is_overlay); //yama_debug This code is reached.
-	}
-
 	if (ip4->daddr == bpf_htonl(0xAC150001)) {
 		is_the_dst = 1;
 	}
@@ -469,6 +465,9 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	}
 
 	nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tuple);
+	if (is_the_dst){
+		cilium_dbg(ctx, 69, 2, bpf_ntohl(ip4->saddr)); //yama_debug ipopsモードの時はここに辿り着いてない
+	}
 	/*if (!nat_info)
 		return CTX_ACT_OK;*/
 	if (!nat_info) {
