@@ -466,7 +466,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 
 	nat_info = nodeport_rev_dnat_get_info_ipv4(ctx, &tuple);
 	if (is_the_dst){
-		cilium_dbg(ctx, 69, 2, bpf_ntohl(ip4->saddr)); //yama_debug ipopsモードの時はここに辿り着いてない
+		cilium_dbg(ctx, 69, 2, bpf_ntohl(ip4->saddr)); //yama_debug
 	}
 	/*if (!nat_info)
 		return CTX_ACT_OK;*/
