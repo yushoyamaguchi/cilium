@@ -452,7 +452,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	has_l4_header = ipv4_has_l4_header(ip4);
 	is_fragment = ipv4_is_fragment(ip4);
 
-	if (ip4->daddr == bpf_htonl(0xAC150001)) {
+	if (ip4->daddr == bpf_htonl(0xAC150001) || ip4->daddr == bpf_htonl(0xAC120001)) {
 		is_the_dst = 1;
 	}
 
