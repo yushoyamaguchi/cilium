@@ -161,6 +161,19 @@ struct ipcache_key {
 	};
 } __packed;
 
+struct geneve_mac_addr {
+    __u8 addr[6];
+    __u8 pad[2];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, struct geneve_mac_addr);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+    __uint(max_entries, 2);
+} GENEVE_MAC_MAP __section_maps_btf;
+
 /* Global IP -> Identity map for applying egress label-based policy */
 struct {
 	__uint(type, BPF_MAP_TYPE_LPM_TRIE);

@@ -212,6 +212,7 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #define L2_RESPONSER_MAP4_SIZE 4096
 #define POLICY_PROG_MAP_SIZE ENDPOINTS_MAP_SIZE
 #define IPV4_FRAG_DATAGRAMS_MAP test_cilium_ipv4_frag_datagrams
+#define GENEVE_MAC_MAP test_cilium_geneve_mac
 #define CILIUM_IPV4_FRAG_MAP_MAX_ENTRIES 8192
 #ifndef SKIP_DEBUG
 #define LB_DEBUG

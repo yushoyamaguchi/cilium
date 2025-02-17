@@ -137,6 +137,7 @@ var bpfMapsPath = []string{
 	"tc/globals/cilium_ratelimit_metrics",
 	"tc/globals/cilium_skip_lb4",
 	"tc/globals/cilium_skip_lb6",
+	"tc/globals/cilium_geneve_mac",
 }
 
 func defaultCommands(confDir string, cmdDir string) []string {
