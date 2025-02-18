@@ -25,6 +25,7 @@ import (
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/maps/encrypt"
 	"github.com/cilium/cilium/pkg/maps/fragmap"
+	"github.com/cilium/cilium/pkg/maps/genevemac"
 	ipcachemap "github.com/cilium/cilium/pkg/maps/ipcache"
 	"github.com/cilium/cilium/pkg/maps/ipmasq"
 	"github.com/cilium/cilium/pkg/maps/lbmap"
@@ -302,6 +303,11 @@ func (d *Daemon) initMaps() error {
 	_, err := lbmap.NewSkipLBMap()
 	if err != nil {
 		return fmt.Errorf("initializing local redirect policy maps: %w", err)
+	}
+
+	_, err = genevemac.NewGeneveMacMap()
+	if err != nil {
+		return fmt.Errorf("initializing geneve mac map: %w", err)
 	}
 
 	return nil
