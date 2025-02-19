@@ -30,6 +30,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/sysctl"
 	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
 	"github.com/cilium/cilium/pkg/datapath/tables"
+	datapathTunnel "github.com/cilium/cilium/pkg/datapath/tunnel"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/identity"
@@ -748,6 +749,22 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	}
 	cDefinesMap["CILIUM_HOST_MAC"] = fmt.Sprintf("{.addr=%s}", mac.CArrayString(ciliumHostLink.Attrs().HardwareAddr))
 	cDefinesMap["CILIUM_HOST_IFINDEX"] = fmt.Sprintf("%d", ciliumHostLink.Attrs().Index)
+
+	if option.Config.TunnelingEnabled() {
+		if option.Config.TunnelProtocol == datapathTunnel.VXLAN.String() {
+			ciliumVxlanLink, err := safenetlink.LinkByName(defaults.VxlanDevice)
+			if err != nil {
+				return fmt.Errorf("looking up link %s: %w", defaults.VxlanDevice, err)
+			}
+			cDefinesMap["CILIUM_OVERLAY_MAC"] = fmt.Sprintf("{.addr=%s}", mac.CArrayString(ciliumVxlanLink.Attrs().HardwareAddr))
+		} else if option.Config.TunnelProtocol == datapathTunnel.Geneve.String() {
+			ciliumGeneveLink, err := safenetlink.LinkByName(defaults.GeneveDevice)
+			if err != nil {
+				return fmt.Errorf("looking up link %s: %w", defaults.GeneveDevice, err)
+			}
+			cDefinesMap["CILIUM_OVERLAY_MAC"] = fmt.Sprintf("{.addr=%s}", mac.CArrayString(ciliumGeneveLink.Attrs().HardwareAddr))
+		}
+	}
 
 	ephemeralMin, err := getEphemeralPortRangeMin(h.sysctl)
 	if err != nil {
