@@ -288,6 +288,7 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 	bool decrypted;
 	bool __maybe_unused is_dsr = false;
 	int ret;
+	int is_geneve_dsr_no_bpfmasq = 0;
 
 	/* verifier workaround (dereference of modified ctx ptr) */
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
@@ -457,9 +458,18 @@ not_esp:
 	}
 #endif /* ENABLE_EGRESS_GATEWAY_COMMON */
 
+#ifdef ENABLE_DSR
+#if DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+	cilium_dbg(ctx, 69,69,69);
+	if (!is_defined(ENABLE_MASQUERADE_IPV4)){
+		is_geneve_dsr_no_bpfmasq = 1;
+	}
+#endif
+#endif
+
 	/* Deliver to local (non-host) endpoint: */
 	ep = lookup_ip4_endpoint(ip4);
-	if (ep && !(ep->flags & ENDPOINT_MASK_HOST_DELIVERY))
+	if (ep && (!(ep->flags & ENDPOINT_MASK_HOST_DELIVERY) || is_geneve_dsr_no_bpfmasq))
 		return ipv4_local_delivery(ctx, ETH_HLEN, *identity, MARK_MAGIC_IDENTITY,
 					   ip4, ep, METRIC_INGRESS, false, true, 0);
 
