@@ -206,6 +206,37 @@ static __always_inline int ipv4_host_delivery(struct __ctx_buff *ctx, struct iph
 	}
 }
 
+static __always_inline int ipv4_host_delivery_from_geneve(struct __ctx_buff *ctx, struct iphdr *ip4)
+{
+	if (1) {
+		union macaddr geneve_mac = CILIUM_OVERLAY_MAC;
+		union macaddr router_mac = THIS_INTERFACE_MAC;
+		int ret;
+		__u8 *g_mac = (__u8 *)&geneve_mac.addr;
+		__u8 g_mac0=g_mac[0];
+		__u8 g_mac1=g_mac[1];
+		__u8 g_mac2=g_mac[2];
+		__u8 g_mac3=g_mac[3];
+		__u8 g_mac4=g_mac[4];
+		__u8 g_mac5=g_mac[5];
+
+		cilium_dbg(ctx, 69,70, g_mac0);
+		cilium_dbg(ctx, 69,70, g_mac1);
+		cilium_dbg(ctx, 69,70, g_mac2);
+		cilium_dbg(ctx, 69,70, g_mac3);
+		cilium_dbg(ctx, 69,70, g_mac4);
+		cilium_dbg(ctx, 69,70, g_mac5);
+
+		ret = ipv4_l3(ctx, ETH_HLEN, (__u8 *)&router_mac.addr,
+			      (__u8 *)&geneve_mac.addr, ip4);
+		if (ret != CTX_ACT_OK){
+			cilium_dbg(ctx, 69,69,71);
+			return ret;
+		}
+		return CTX_ACT_OK;
+	}
+}
+
 #if defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT)
 static __always_inline int handle_inter_cluster_revsnat(struct __ctx_buff *ctx,
 							__u32 src_sec_identity,
@@ -460,16 +491,20 @@ not_esp:
 
 #ifdef ENABLE_DSR
 #if DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
-	cilium_dbg(ctx, 69,69,69);
 	if (!is_defined(ENABLE_MASQUERADE_IPV4)){
+		cilium_dbg(ctx, 69,69,69);
 		is_geneve_dsr_no_bpfmasq = 1;
 	}
 #endif
 #endif
 
+	if (is_geneve_dsr_no_bpfmasq) {
+		return ipv4_host_delivery_from_geneve(ctx, ip4);
+	}
+
 	/* Deliver to local (non-host) endpoint: */
 	ep = lookup_ip4_endpoint(ip4);
-	if (ep && (!(ep->flags & ENDPOINT_MASK_HOST_DELIVERY) || is_geneve_dsr_no_bpfmasq))
+	if (ep && (!(ep->flags & ENDPOINT_MASK_HOST_DELIVERY)))
 		return ipv4_local_delivery(ctx, ETH_HLEN, *identity, MARK_MAGIC_IDENTITY,
 					   ip4, ep, METRIC_INGRESS, false, true, 0);
 
