@@ -212,27 +212,11 @@ static __always_inline int ipv4_host_delivery_from_geneve(struct __ctx_buff *ctx
 		union macaddr geneve_mac = CILIUM_OVERLAY_MAC;
 		union macaddr router_mac = THIS_INTERFACE_MAC;
 		int ret;
-		__u8 *g_mac = (__u8 *)&geneve_mac.addr;
-		__u8 g_mac0=g_mac[0];
-		__u8 g_mac1=g_mac[1];
-		__u8 g_mac2=g_mac[2];
-		__u8 g_mac3=g_mac[3];
-		__u8 g_mac4=g_mac[4];
-		__u8 g_mac5=g_mac[5];
-
-		cilium_dbg(ctx, 69,70, g_mac0);
-		cilium_dbg(ctx, 69,70, g_mac1);
-		cilium_dbg(ctx, 69,70, g_mac2);
-		cilium_dbg(ctx, 69,70, g_mac3);
-		cilium_dbg(ctx, 69,70, g_mac4);
-		cilium_dbg(ctx, 69,70, g_mac5);
 
 		ret = ipv4_l3(ctx, ETH_HLEN, (__u8 *)&router_mac.addr,
 			      (__u8 *)&geneve_mac.addr, ip4);
-		if (ret != CTX_ACT_OK){
-			cilium_dbg(ctx, 69,69,71);
+		if (ret != CTX_ACT_OK)
 			return ret;
-		}
 		ctx_change_type(ctx, PACKET_HOST);
 		return CTX_ACT_OK;
 	}
@@ -493,7 +477,6 @@ not_esp:
 #ifdef ENABLE_DSR
 #if DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
 	if (!is_defined(ENABLE_MASQUERADE_IPV4)){
-		cilium_dbg(ctx, 69,69,69);
 		is_geneve_dsr_no_bpfmasq = 1;
 	}
 #endif
