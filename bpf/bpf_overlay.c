@@ -233,6 +233,7 @@ static __always_inline int ipv4_host_delivery_from_geneve(struct __ctx_buff *ctx
 			cilium_dbg(ctx, 69,69,71);
 			return ret;
 		}
+		ctx_change_type(ctx, PACKET_HOST);
 		return CTX_ACT_OK;
 	}
 }
