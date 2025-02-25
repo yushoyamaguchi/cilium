@@ -304,7 +304,7 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 	bool decrypted;
 	bool __maybe_unused is_dsr = false;
 	int ret;
-	int is_geneve_dsr_no_bpfmasq = 0;
+	int is_geneve_dsr_packet = 0;
 
 	/* verifier workaround (dereference of modified ctx ptr) */
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
@@ -475,14 +475,24 @@ not_esp:
 #endif /* ENABLE_EGRESS_GATEWAY_COMMON */
 
 #ifdef ENABLE_DSR
-#if DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
+#if (defined(IS_BPF_OVERLAY) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)
+	int is_geneve_dsr_no_bpfmasq = 0;
+	struct geneve_dsr_opt4 gopt;
 	if (!is_defined(ENABLE_MASQUERADE_IPV4)){
 		is_geneve_dsr_no_bpfmasq = 1;
 	}
-#endif
-#endif
-
 	if (is_geneve_dsr_no_bpfmasq) {
+		ret = ctx_get_tunnel_opt(ctx, &gopt, sizeof(gopt));
+		if (ret>0){
+			if (gopt.opt_type == DSR_GENEVE_OPT_TYPE){
+				is_geneve_dsr_packet = 1;
+			}
+		}
+	}
+#endif
+#endif /* ENABLE_DSR */
+
+	if (is_geneve_dsr_packet) {
 		return ipv4_host_delivery_from_geneve(ctx, ip4);
 	}
 
