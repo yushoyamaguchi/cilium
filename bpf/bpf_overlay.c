@@ -305,6 +305,12 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 	bool __maybe_unused is_dsr = false;
 	int ret;
 	int is_geneve_dsr_packet = 0;
+#ifdef ENABLE_DSR
+#if (defined(IS_BPF_OVERLAY) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)	
+	int is_geneve_dsr_no_bpfmasq = 0;
+	struct geneve_dsr_opt4 gopt;
+#endif
+#endif
 
 	/* verifier workaround (dereference of modified ctx ptr) */
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
@@ -476,8 +482,6 @@ not_esp:
 
 #ifdef ENABLE_DSR
 #if (defined(IS_BPF_OVERLAY) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)
-	int is_geneve_dsr_no_bpfmasq = 0;
-	struct geneve_dsr_opt4 gopt;
 	if (!is_defined(ENABLE_MASQUERADE_IPV4)){
 		is_geneve_dsr_no_bpfmasq = 1;
 	}
