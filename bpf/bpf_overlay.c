@@ -488,7 +488,7 @@ not_esp:
 	if (is_geneve_dsr_no_bpfmasq) {
 		ret = ctx_get_tunnel_opt(ctx, &gopt, sizeof(gopt));
 		if (ret>0){
-			if (gopt.opt_type == DSR_GENEVE_OPT_TYPE){
+			if (gopt.hdr.type == DSR_GENEVE_OPT_TYPE){
 				is_geneve_dsr_packet = 1;
 			}
 		}
