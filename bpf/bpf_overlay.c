@@ -305,8 +305,8 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 	bool decrypted;
 	bool __maybe_unused is_dsr = false;
 	int ret;
-	int is_geneve_dsr_packet = 0;
 #if defined(ENABLE_DSR) && defined(IS_BPF_OVERLAY) && (DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)
+	int is_geneve_dsr_packet = 0;
 	struct geneve_dsr_opt4 gopt;
 #endif
 
@@ -478,17 +478,28 @@ not_esp:
 	}
 #endif /* ENABLE_EGRESS_GATEWAY_COMMON */
 
+/**/
 #if defined(ENABLE_DSR) && defined(IS_BPF_OVERLAY) && (DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)
-   if (!is_defined(ENABLE_MASQUERADE_IPV4)) {
-       ret = ctx_get_tunnel_opt(ctx, &gopt, sizeof(gopt));
-       if (ret > 0 && gopt.hdr.type == DSR_GENEVE_OPT_TYPE) {
-           is_geneve_dsr_packet = 1;
-       }
-   }
-#endif
+	/* Pass packets which will be returned using Geneve DSR
+	*  to host-stack for conntrack entry insertion.
+	*  This is needed because the packet will be masqueraded 
+	*  by iptables if the conntrack entry isn't exist.
+	*/
+	if (!is_defined(ENABLE_MASQUERADE_IPV4)) {
+		ret = ctx_get_tunnel_opt(ctx, &gopt, sizeof(gopt));
+		/* Mark only Geneve DSR packets.
+		*  In TCP, only SYN packets have DSR_GENEVE_OPT_TYPE.
+		*  However, there is no problem because purpose of this procedure
+		*  is to insert conntrack entry of this flow.
+		*/
+		if (ret > 0 && gopt.hdr.type == DSR_GENEVE_OPT_TYPE) {
+			is_geneve_dsr_packet = 1;
+		}
+	}
 	if (is_geneve_dsr_packet) {
 		return ipv4_handle_geneve_dsr(ctx, ip4);
 	}
+#endif
 	
 	/* Deliver to local (non-host) endpoint: */
 	ep = lookup_ip4_endpoint(ip4);
