@@ -1141,6 +1141,9 @@ const (
 
 	// ConnectivityProbeFrequencyRatio is the name of the option to specify the connectivity probe frequency
 	ConnectivityProbeFrequencyRatio = "connectivity-probe-frequency-ratio"
+
+	// TunnelProtocol
+	TunnelProtocol = "tunnel-protocol"
 )
 
 // Default string arguments
@@ -2238,6 +2241,9 @@ type DaemonConfig struct {
 
 	// ConnectivityProbeFrequencyRatio is the ratio of the connectivity probe frequency vs resource consumption
 	ConnectivityProbeFrequencyRatio float64
+
+	// TunnelProtocol
+	TunnelProtocol string
 }
 
 var (
@@ -2303,6 +2309,8 @@ var (
 		EnableSourceIPVerification: defaults.EnableSourceIPVerification,
 
 		ConnectivityProbeFrequencyRatio: defaults.ConnectivityProbeFrequencyRatio,
+
+		TunnelProtocol: defaults.TunnelProtocol,
 	}
 )
 
@@ -3321,6 +3329,9 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 		log.Warningf("specified connectivity probe frequency ratio %f must be in the range [0.0, 1.0], using default", connectivityFreqRatio)
 		c.ConnectivityProbeFrequencyRatio = defaults.ConnectivityProbeFrequencyRatio
 	}
+
+	// TunnelProtocol
+	c.TunnelProtocol = vp.GetString(TunnelProtocol)
 }
 
 func (c *DaemonConfig) populateLoadBalancerSettings(vp *viper.Viper) {

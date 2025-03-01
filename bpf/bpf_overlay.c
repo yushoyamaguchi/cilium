@@ -207,6 +207,22 @@ static __always_inline int ipv4_host_delivery(struct __ctx_buff *ctx, struct iph
 	}
 }
 
+static __always_inline int ipv4_handle_geneve_dsr(struct __ctx_buff *ctx, struct iphdr *ip4)
+{
+	if (1) {
+		union macaddr geneve_mac = CILIUM_OVERLAY_MAC;
+		union macaddr router_mac = THIS_INTERFACE_MAC;
+		int ret;
+
+		ret = ipv4_l3(ctx, ETH_HLEN, (__u8 *)&router_mac.addr,
+			      (__u8 *)&geneve_mac.addr, ip4);
+		if (ret != CTX_ACT_OK)
+			return ret;
+		ctx_change_type(ctx, PACKET_HOST);
+		return CTX_ACT_OK;
+	}
+}
+
 #if defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT)
 static __always_inline int handle_inter_cluster_revsnat(struct __ctx_buff *ctx,
 							__u32 src_sec_identity,
@@ -289,6 +305,10 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 	bool decrypted;
 	bool __maybe_unused is_dsr = false;
 	int ret;
+	int is_geneve_dsr_packet = 0;
+#if defined(ENABLE_DSR) && defined(IS_BPF_OVERLAY) && (DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)
+	struct geneve_dsr_opt4 gopt;
+#endif
 
 	/* verifier workaround (dereference of modified ctx ptr) */
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
@@ -458,6 +478,18 @@ not_esp:
 	}
 #endif /* ENABLE_EGRESS_GATEWAY_COMMON */
 
+#if defined(ENABLE_DSR) && defined(IS_BPF_OVERLAY) && (DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)
+   if (!is_defined(ENABLE_MASQUERADE_IPV4)) {
+       ret = ctx_get_tunnel_opt(ctx, &gopt, sizeof(gopt));
+       if (ret > 0 && gopt.hdr.type == DSR_GENEVE_OPT_TYPE) {
+           is_geneve_dsr_packet = 1;
+       }
+   }
+#endif
+	if (is_geneve_dsr_packet) {
+		return ipv4_handle_geneve_dsr(ctx, ip4);
+	}
+	
 	/* Deliver to local (non-host) endpoint: */
 	ep = lookup_ip4_endpoint(ip4);
 	if (ep && !(ep->flags & ENDPOINT_MASK_HOST_DELIVERY))

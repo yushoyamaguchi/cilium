@@ -59,6 +59,7 @@ volatile const __u64 __config_ROUTER_IP_2;
  */
 #define ENCRYPTED_OVERLAY_ID 11
 #define CILIUM_HOST_MAC { .addr = { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x56 } }
+#define CILIUM_OVERLAY_MAC { .addr = { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x57 } }
 #define NODEPORT_PORT_MIN 30000
 #define NODEPORT_PORT_MAX 32767
 #define NODEPORT_PORT_MIN_NAT (NODEPORT_PORT_MAX + 1)
