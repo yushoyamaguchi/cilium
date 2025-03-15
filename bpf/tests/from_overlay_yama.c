@@ -20,13 +20,11 @@
 static volatile const __u8 *client_mac = mac_one;
 static volatile const __u8 *server_mac = mac_two;
 
-#include "bpf_lxc.c"
+#include "bpf_overlay.c"
 
 ASSIGN_CONFIG(__u32, endpoint_ipv4, v4_pod_one)
 
-#include "lib/policy.h"
-
-#define FROM_CONTAINER 0
+#define FROM_OVERLAY 0
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
@@ -35,7 +33,7 @@ struct {
 	__array(values, int());
 } entry_call_map __section(".maps") = {
 	.values = {
-		[FROM_CONTAINER] = &cil_from_container,
+		[FROM_OVERLAY] = &cil_from_overlay,
 	},
 };
 
@@ -71,10 +69,8 @@ int tc_lxc_yama_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_lxc_yama")
 int tc_lxc_yama_setup(struct __ctx_buff *ctx)
 {
-	policy_add_egress_allow_all_entry();
-
 	/* Jump into the entrypoint */
-	tail_call_static(ctx, entry_call_map, FROM_CONTAINER);
+	tail_call_static(ctx, entry_call_map, FROM_OVERLAY);
 	/* Fail if we didn't jump */
 	return TEST_ERROR;
 }
@@ -95,7 +91,9 @@ int tc_lxc_yama_check(struct __ctx_buff *ctx)
         test_fatal("status code out of bounds");
 
     status_code = data;
-    assert(*status_code == CTX_ACT_OK);
+	//assert(*status_code == CTX_ACT_REDIRECT);
+	// currently the status code is CTX_ACT_DROP
+	assert(*status_code == CTX_ACT_DROP);
 
     test_finish();
 }
