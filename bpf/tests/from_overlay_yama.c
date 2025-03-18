@@ -20,6 +20,18 @@
 static volatile const __u8 *client_mac = mac_one;
 static volatile const __u8 *server_mac = mac_two;
 
+#define skb_get_tunnel_key mock_skb_get_tunnel_key
+int mock_skb_get_tunnel_key(__maybe_unused struct __sk_buff *skb,
+			    struct bpf_tunnel_key *to,
+			    __maybe_unused __u32 size,
+			    __maybe_unused __u32 flags)
+{
+	to->remote_ipv4 = v4_node_two;
+	/* 0xfffff is the default SECLABEL */
+	to->tunnel_id = 0xfffff;
+	return 0;
+}
+
 #include "bpf_overlay.c"
 
 ASSIGN_CONFIG(__u32, endpoint_ipv4, v4_pod_one)
@@ -36,7 +48,6 @@ struct {
 		[FROM_OVERLAY] = &cil_from_overlay,
 	},
 };
-
 
 PKTGEN("tc", "tc_lxc_yama")
 int tc_lxc_yama_pktgen(struct __ctx_buff *ctx)
@@ -91,9 +102,7 @@ int tc_lxc_yama_check(struct __ctx_buff *ctx)
         test_fatal("status code out of bounds");
 
     status_code = data;
-	//assert(*status_code == CTX_ACT_REDIRECT);
-	// currently the status code is CTX_ACT_DROP
-	assert(*status_code == CTX_ACT_DROP);
+	assert(*status_code == CTX_ACT_REDIRECT);
 
     test_finish();
 }
