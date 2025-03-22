@@ -615,6 +615,8 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 	__u16 proto;
 	int ret;
 
+	printk("yama_debug: cil_from_overlay\n");
+
 	bpf_clear_meta(ctx);
 	ctx_skip_nodeport_clear(ctx);
 
