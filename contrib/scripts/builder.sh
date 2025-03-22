@@ -38,13 +38,14 @@ else
     MOUNT_CCACHE_DIR="-v ${BUILDER_CCACHE_DIR}:${USER_PATH}/.ccache"
 fi
 
-docker run --rm \
+docker run -d  -it --name bpf-test-container \
 	$USER_OPTION \
 	$MOUNT_GOCACHE_DIR \
 	$MOUNT_GOMODCACHE_DIR \
 	$MOUNT_CCACHE_DIR \
+	-v /sys/kernel/debug:/sys/kernel/debug \
 	-v "$PWD":/go/src/github.com/cilium/cilium \
 	-w /go/src/github.com/cilium/cilium \
 	${DOCKER_ARGS:+"$DOCKER_ARGS"} \
 	"$CILIUM_BUILDER_IMAGE" \
-	"$@"
+	bash -c "$* && exec bash"

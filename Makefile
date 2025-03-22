@@ -391,6 +391,14 @@ lint: golangci-lint
 
 lint-fix: golangci-lint-fix
 
+sh-bpf-test-container: ## Run a shell inside the bpf-test container.
+	docker exec -it bpf-test-container bash
+
+rm-bpf-test-container: ## Remove the bpf-test container.
+	docker stop bpf-test-container
+	docker rm bpf-test-container
+
+
 logging-subsys-field: ## Validate logrus subsystem field for logs in Go source code.
 	@$(ECHO_CHECK) contrib/scripts/check-logging-subsys-field.sh
 	$(QUIET) contrib/scripts/check-logging-subsys-field.sh
