@@ -472,7 +472,9 @@ not_esp:
 	 * This is needed because the packet will be masqueraded
 	 * by iptables if the conntrack entry isn't exist.
 	 */
+	printk("yama_debug: is_dsr=%d",is_dsr);
 	if (!is_defined(ENABLE_HOST_ROUTING) && is_dsr) {
+		printk("yama_debug: via_stack");
 		is_delivered_via_stack = true;
 	}
 #endif
@@ -615,7 +617,7 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 	__u16 proto;
 	int ret;
 
-	printk("yama_debug: cil_from_overlay\n");
+	//printk("yama_debug: cil_from_overlay\n");
 
 	bpf_clear_meta(ctx);
 	ctx_skip_nodeport_clear(ctx);

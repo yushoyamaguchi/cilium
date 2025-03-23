@@ -2746,6 +2746,7 @@ skip_service_lookup:
 			ret = nodeport_extract_dsr_v4(ctx, ip4, &tuple,
 						      l4_off, &key.address,
 						      &key.dport, dsr);
+			printk("yama_debug: after nodeport_extract_dsr_v4() dsr=%d",*dsr); // dsr become 1
 			if (IS_ERR(ret))
 				return ret;
 			if (*dsr)

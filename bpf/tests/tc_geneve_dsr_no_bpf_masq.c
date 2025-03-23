@@ -23,8 +23,8 @@
 #define CLIENT_IP v4_pod_one
 #define CLIENT_PORT __bpf_htons(111)
 
-#define SERVER_IP v4_pod_two
-#define SERVER_PORT __bpf_htons(222)
+#define BACKEND_IP		v4_pod_two
+#define BACKEND_PORT		__bpf_htons(8080)
 
 #define NODE_IP v4_node_one
 
@@ -72,8 +72,8 @@ int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
 
     l4 = pktgen__push_ipv4_tcp_packet(&builder,
                                       (__u8 *)client_mac, (__u8 *)server_mac,
-                                      CLIENT_IP, SERVER_IP,
-                                      CLIENT_PORT, SERVER_PORT);
+                                      CLIENT_IP, BACKEND_IP,
+                                      CLIENT_PORT, BACKEND_PORT);
     if (!l4)
         return TEST_ERROR;
 
@@ -90,6 +90,28 @@ int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_geneve_dsr_no_bpf_masq")
 int tc_geneve_dsr_no_bpf_masq_setup(struct __ctx_buff *ctx)
 {
+    struct ipv4_ct_tuple ct = {
+		.daddr = BACKEND_IP,
+		.saddr = CLIENT_IP,
+		.dport = BACKEND_PORT,
+		.sport = CLIENT_PORT,
+		.nexthdr = IPPROTO_TCP,
+		.flags = 1,
+	};
+	struct ct_state state = {0};
+    ct_create4(&CT_MAP_TCP4, NULL, &ct, ctx, CT_INGRESS, &state, NULL);
+    ct_update_dsr(&CT_MAP_TCP4,&ct,true);
+
+    struct ipv4_ct_tuple ct_rev = {
+		.daddr = CLIENT_IP,
+		.saddr = BACKEND_IP,
+		.dport = CLIENT_PORT,
+		.sport = BACKEND_PORT,
+		.nexthdr = IPPROTO_TCP,
+		.flags = 1,
+	};
+    ct_create4(&CT_MAP_TCP4, NULL, &ct_rev, ctx, CT_INGRESS, &state, NULL);
+    ct_update_dsr(&CT_MAP_TCP4,&ct_rev,true);
     /* Jump into the entrypoint */
     tail_call_static(ctx, entry_call_map, FROM_OVERLAY);
     /* Fail if we didn't jump */
