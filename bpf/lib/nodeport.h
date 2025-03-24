@@ -1779,6 +1779,7 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 		int ret = 0;
 
 		ret = ctx_get_tunnel_opt(ctx, &gopt, sizeof(gopt));
+		printk("yama_debug: ctx_get_tunnel_opt() ret=%d",ret);
 
 		if (ret > 0) {
 			if (gopt.hdr.opt_class == bpf_htons(DSR_GENEVE_OPT_CLASS) &&
@@ -2746,7 +2747,7 @@ skip_service_lookup:
 			ret = nodeport_extract_dsr_v4(ctx, ip4, &tuple,
 						      l4_off, &key.address,
 						      &key.dport, dsr);
-			printk("yama_debug: after nodeport_extract_dsr_v4() dsr=%d",*dsr); // dsr become 1
+			printk("yama_debug: after nodeport_extract_dsr_v4() dsr=%d",*dsr);
 			if (IS_ERR(ret))
 				return ret;
 			if (*dsr)

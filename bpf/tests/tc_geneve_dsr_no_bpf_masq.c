@@ -43,6 +43,16 @@ int mock_skb_get_tunnel_key(__maybe_unused struct __sk_buff *skb,
 	return 0;
 }
 
+#define skb_get_tunnel_opt mock_skb_get_tunnel_opt
+int mock_skb_get_tunnel_opt(__maybe_unused struct __sk_buff *skb,
+                void *opt, __u32 size)
+{
+    struct geneve_dsr_opt4 *gopt = opt;
+    gopt->hdr.opt_class = bpf_htons(DSR_GENEVE_OPT_CLASS);
+    gopt->hdr.type = DSR_GENEVE_OPT_TYPE;
+    return size;
+}
+
 #include "bpf_overlay.c"
 
 ASSIGN_CONFIG(__u32, endpoint_ipv4, v4_pod_one)
@@ -133,7 +143,7 @@ int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
         test_fatal("status code out of bounds");
 
     status_code = data;
-    assert(*status_code == CTX_ACT_REDIRECT);
+    assert(*status_code == CTX_ACT_OK);
 
     test_finish();
 }

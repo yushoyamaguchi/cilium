@@ -326,6 +326,7 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 
 		ret = nodeport_lb4(ctx, ip4, ETH_HLEN, *identity, &punt_to_stack,
 				   ext_err, &is_dsr);
+		printk("yama_debug: after nodeport_lb4() is_dsr=%d",is_dsr);
 		/* nodeport_lb4() returns with TC_ACT_REDIRECT for
 		 * traffic to L7 LB. Policy enforcement needs to take
 		 * place after L7 LB has processed the packet, so we
@@ -472,7 +473,7 @@ not_esp:
 	 * This is needed because the packet will be masqueraded
 	 * by iptables if the conntrack entry isn't exist.
 	 */
-	printk("yama_debug: is_dsr=%d",is_dsr);
+	printk("yama_debug: in-ifdef is_dsr=%d",is_dsr);
 	if (!is_defined(ENABLE_HOST_ROUTING) && is_dsr) {
 		printk("yama_debug: via_stack");
 		is_delivered_via_stack = true;
