@@ -1640,6 +1640,8 @@ static __always_inline int encap_geneve_dsr_opt4(struct __ctx_buff *ctx, int l3_
 	}
 #endif
 
+	cilium_dbg(ctx, 69, svc_port, bpf_htonl(svc_addr));
+
 	info = lookup_ip4_remote_endpoint(ip4->daddr, 0);
 	if (!info || info->tunnel_endpoint == 0)
 		return DROP_NO_TUNNEL_ENDPOINT;
