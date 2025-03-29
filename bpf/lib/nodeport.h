@@ -2719,6 +2719,11 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	cilium_capture_in(ctx);
 
 	ret = lb4_extract_tuple(ctx, ip4, l3_off, &l4_off, &tuple);
+	if (ip4->daddr == bpf_htonl(0xAC790000)) {
+		if (ret >= 0){
+			cilium_dbg(ctx, 69, 70, bpf_htonl(ip4->saddr));
+		}
+	}
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			is_svc_proto = false;
