@@ -80,6 +80,7 @@ nodeport_add_tunnel_encap(struct __ctx_buff *ctx, __u32 src_ip, __be16 src_port,
 			  __be32 dst_ip, __u32 src_sec_identity, __u32 dst_sec_identity,
 			  enum trace_reason ct_reason, __u32 monitor, int *ifindex)
 {
+	cilium_dbg(ctx, 69, 2, bpf_htonl(dst_ip)); // v4だとくるv6だとこない
 	/* Let kernel choose the outer source ip */
 	if (ctx_is_skb())
 		src_ip = 0;
@@ -108,6 +109,7 @@ nodeport_add_tunnel_encap_opt(struct __ctx_buff *ctx, __u32 src_ip, __be16 src_p
 			      void *opt, __u32 opt_len, enum trace_reason ct_reason,
 			      __u32 monitor, int *ifindex)
 {
+	cilium_dbg(ctx, 69, 1, bpf_htonl(dst_ip)); // v4だとくるv6だとこない
 	/* Let kernel choose the outer source ip */
 	if (ctx_is_skb())
 		src_ip = 0;
@@ -339,8 +341,13 @@ static __always_inline int encap_geneve_dsr_opt6(struct __ctx_buff *ctx,
 
 	dst = (union v6addr *)&ip6->daddr;
 	info = lookup_ip6_remote_endpoint(dst, 0);
-	if (!info || info->tunnel_endpoint == 0)
+	if (!info || info->tunnel_endpoint == 0){
+		if (!info)
+			cilium_dbg(ctx, 69, 20, 0);
+		else
+			cilium_dbg(ctx, 69, 21, info->tunnel_endpoint); //v6の時ここが0になってる
 		return DROP_NO_TUNNEL_ENDPOINT;
+	}
 
 	tunnel_endpoint = info->tunnel_endpoint;
 	dst_sec_identity = info->sec_identity;
@@ -1645,6 +1652,8 @@ static __always_inline int encap_geneve_dsr_opt4(struct __ctx_buff *ctx, int l3_
 	info = lookup_ip4_remote_endpoint(ip4->daddr, 0);
 	if (!info || info->tunnel_endpoint == 0)
 		return DROP_NO_TUNNEL_ENDPOINT;
+
+	cilium_dbg(ctx, 69, 70, info->tunnel_endpoint); // v4の時はIPアドレスがここに入ってる
 
 	tunnel_endpoint = info->tunnel_endpoint;
 	dst_sec_identity = info->sec_identity;
