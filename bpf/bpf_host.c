@@ -1321,6 +1321,13 @@ int cil_from_host(struct __ctx_buff *ctx)
 	int ret __maybe_unused;
 	__be16 proto = 0;
 	__u32 magic;
+	void *data, *data_end;
+	struct iphdr *ip4;
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip4))
+		return DROP_INVALID;
+
+	cilium_dbg(ctx, 69, bpf_htonl(ip4->saddr), bpf_htonl(ip4->daddr));
 
 	/* Traffic from the host ns going through cilium_host device must
 	 * not be subject to EDT rate-limiting.
