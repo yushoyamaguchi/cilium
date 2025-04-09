@@ -229,6 +229,7 @@ static __always_inline int ipv4_host_delivery(struct __ctx_buff *ctx,
 	if (deliver_via_stack) {
 		/* Deliver to the host-stack */
 		ctx_change_type(ctx, PACKET_HOST);
+		cilium_dbg(ctx, 69, 5, 10);
 		return CTX_ACT_OK;
 	}
 	if (1) {
@@ -501,15 +502,34 @@ not_esp:
 #endif /* ENABLE_EGRESS_GATEWAY_COMMON */
 
 #if defined(ENABLE_DSR) && (DSR_ENCAP_MODE == DSR_ENCAP_GENEVE)
+#ifndef ENABLE_HOST_ROUTING
 	/* Pass packets which will be returned using Geneve DSR
 	 * to host-stack for conntrack entry insertion.
 	 * This is needed because the packet will be masqueraded
 	 * by iptables if the conntrack entry isn't exist.
 	 */
-	if (!is_defined(ENABLE_HOST_ROUTING) && is_dsr) {
+	if (is_dsr) {
+		cilium_dbg(ctx, 69, 5, 1);
 		is_delivered_via_stack = true;
 	}
+#endif /* ENABLE_HOST_ROUTING */
 #endif
+
+#ifdef ENABLE_HOST_ROUTING
+	cilium_dbg(ctx, 69, 5, 21);
+#endif /* ENABLE_HOST_ROUTING */
+
+#ifndef ENABLE_HOST_ROUTING
+	cilium_dbg(ctx, 69, 5, 22);
+#endif /* ENABLE_HOST_ROUTING */
+
+#ifdef ENABLE_NODEPORT
+	cilium_dbg(ctx, 69, 5, 23);
+#endif /* ENABLE_NODEPORT */
+
+#ifndef ENABLE_NODEPORT
+	cilium_dbg(ctx, 69, 5, 24);
+#endif /* ENABLE_NODEPORT */
 
 	if (!is_delivered_via_stack) {
 		/* Deliver to local (non-host) endpoint: */
