@@ -92,6 +92,7 @@ func writeIncludes(w io.Writer) (int, error) {
 
 // WriteNodeConfig writes the local node configuration to the specified writer.
 func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeConfiguration) error {
+	fmt.Println("yama_debug: WriteNodeConfig")
 	extraMacrosMap := make(dpdef.Map)
 	cDefinesMap := make(dpdef.Map)
 
@@ -349,6 +350,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	cDefinesMap["NAT_46X64_PREFIX_3"] = "0"
 
 	if option.Config.EnableNodePort {
+		fmt.Printf("yama_debug: EnableHostLegacyRouting = %v\n", option.Config.EnableHostLegacyRouting)
 		if option.Config.EnableHealthDatapath {
 			cDefinesMap["ENABLE_HEALTH_CHECK"] = "1"
 		}
@@ -440,7 +442,9 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		if option.Config.NodePortAcceleration != option.NodePortAccelerationDisabled {
 			cDefinesMap["ENABLE_NODEPORT_ACCELERATION"] = "1"
 		}
+		fmt.Println("yama_debug: before ENABLE_HOST_ROUTING")
 		if !option.Config.EnableHostLegacyRouting {
+			fmt.Println("yama_debug: ENABLE_HOST_ROUTING = 1")
 			cDefinesMap["ENABLE_HOST_ROUTING"] = "1"
 		}
 		if option.Config.EnableSVCSourceRangeCheck {
