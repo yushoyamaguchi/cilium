@@ -1240,6 +1240,14 @@ int cil_from_netdev(struct __ctx_buff *ctx)
 		obs_point = TRACE_FROM_CRYPTO;
 #endif
 
+#ifdef ENABLE_HOST_ROUTING
+	cilium_dbg(ctx, 69, 69, 1);
+#endif /* ENABLE_HOST_ROUTING */
+
+#ifndef ENABLE_HOST_ROUTING
+	cilium_dbg(ctx, 69, 69, 2);
+#endif /* ENABLE_HOST_ROUTING */
+
 	/* Filter allowed vlan id's and pass them back to kernel.
 	 * We will see the packet again in from-netdev@eth0.vlanXXX.
 	 */
