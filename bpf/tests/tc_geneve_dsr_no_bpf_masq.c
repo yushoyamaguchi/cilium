@@ -30,7 +30,6 @@
 static volatile const __u8 *client_mac = mac_one;
 static volatile const __u8 *server_mac = mac_two;
 
-#include "lib/endpoint.h"
 
 #define skb_get_tunnel_key mock_skb_get_tunnel_key
 int mock_skb_get_tunnel_key(__maybe_unused struct __sk_buff *skb,
@@ -56,6 +55,8 @@ int mock_skb_get_tunnel_opt(__maybe_unused struct __sk_buff *skb,
 }
 
 #include "bpf_overlay.c"
+
+#include "lib/endpoint.h"
 
 #define FROM_OVERLAY 0
 
