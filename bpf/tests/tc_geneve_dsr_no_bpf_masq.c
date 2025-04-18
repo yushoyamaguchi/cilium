@@ -30,6 +30,8 @@
 static volatile const __u8 *client_mac = mac_one;
 static volatile const __u8 *server_mac = mac_two;
 
+#include "lib/endpoint.h"
+
 #define skb_get_tunnel_key mock_skb_get_tunnel_key
 int mock_skb_get_tunnel_key(__maybe_unused struct __sk_buff *skb,
 			    struct bpf_tunnel_key *to,
@@ -98,6 +100,7 @@ int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_geneve_dsr_no_bpf_masq")
 int tc_geneve_dsr_no_bpf_masq_setup(struct __ctx_buff *ctx)
 {
+	endpoint_v4_add_entry(CLIENT_IP, 0, 0, 0, 0, 0, NULL, NULL);
 	/* Jump into the entrypoint */
 	tail_call_static(ctx, entry_call_map, FROM_OVERLAY);
 	/* Fail if we didn't jump */
