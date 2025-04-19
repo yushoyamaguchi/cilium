@@ -101,7 +101,7 @@ int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_geneve_dsr_no_bpf_masq")
 int tc_geneve_dsr_no_bpf_masq_setup(struct __ctx_buff *ctx)
 {
-	endpoint_v4_add_entry(CLIENT_IP, 0, 0, 0, 0, 0, NULL, NULL);
+	endpoint_v4_add_entry(BACKEND_IP, 0, 0, 0, 0, 0, NULL, NULL);
 	/* Jump into the entrypoint */
 	tail_call_static(ctx, entry_call_map, FROM_OVERLAY);
 	/* Fail if we didn't jump */
