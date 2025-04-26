@@ -112,6 +112,8 @@ int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
 {
 	void *data, *data_end;
 	__u32 *status_code;
+	struct ipv4_ct_tuple tuple={};
+	struct ct_entry *entry;
 
 	test_init();
 
@@ -124,6 +126,23 @@ int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
 	/* The packet should be passed to kernel-stack */
 	status_code = data;
 	assert(*status_code == CTX_ACT_OK);
+
+	tuple.saddr = CLIENT_IP;
+	tuple.daddr = BACKEND_IP;
+	tuple.sport = BACKEND_PORT;
+	tuple.dport = CLIENT_PORT;
+	tuple.nexthdr = IPPROTO_TCP;
+	tuple.flags = TUPLE_F_OUT;
+
+	ipv4_ct_tuple_reverse(&tuple);
+	printk("saddr: %x\n", bpf_htonl(tuple.saddr));
+	printk("daddr: %x\n", bpf_htonl(tuple.daddr));
+	printk("sport: %d\n", bpf_ntohs(tuple.sport));
+	printk("dport: %d\n", bpf_ntohs(tuple.dport));
+
+	entry = map_lookup_elem(&cilium_ct4_global, &tuple);
+	if (!entry)
+		test_fatal("No entry in conntrack map");
 
 	test_finish();
 }

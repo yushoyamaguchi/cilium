@@ -1797,6 +1797,9 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 			 */
 			*dsr = ct_has_dsr_egress_entry4(get_ct_map4(&tmp), &tmp);
 			*port = 0;
+			cilium_dbg(ctx, 69, bpf_htonl(tmp.saddr), bpf_htonl(tmp.daddr));
+			cilium_dbg(ctx, 69, bpf_ntohs(tmp.sport), bpf_ntohs(tmp.dport));
+			cilium_dbg(ctx, 69, tmp.nexthdr, tmp.flags);
 			return 0;
 		}
 	}
