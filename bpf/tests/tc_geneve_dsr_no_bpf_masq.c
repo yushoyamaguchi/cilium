@@ -127,18 +127,12 @@ int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
 	status_code = data;
 	assert(*status_code == CTX_ACT_OK);
 
-	tuple.saddr = CLIENT_IP;
-	tuple.daddr = BACKEND_IP;
-	tuple.sport = BACKEND_PORT;
-	tuple.dport = CLIENT_PORT;
+	tuple.saddr = BACKEND_IP;
+	tuple.daddr = CLIENT_IP;
+	tuple.sport = CLIENT_PORT;
+	tuple.dport = BACKEND_PORT;
 	tuple.nexthdr = IPPROTO_TCP;
 	tuple.flags = TUPLE_F_OUT;
-
-	ipv4_ct_tuple_reverse(&tuple);
-	printk("saddr: %x\n", bpf_htonl(tuple.saddr));
-	printk("daddr: %x\n", bpf_htonl(tuple.daddr));
-	printk("sport: %d\n", bpf_ntohs(tuple.sport));
-	printk("dport: %d\n", bpf_ntohs(tuple.dport));
 
 	entry = map_lookup_elem(&cilium_ct4_global, &tuple);
 	if (!entry)

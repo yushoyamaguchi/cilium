@@ -2059,6 +2059,7 @@ create_ct:
 		ct_state_new.src_sec_id = WORLD_IPV4_ID;
 		ct_state_new.dsr_internal = 1;
 
+		printk("yama_debug: In bpf-test, ct_create4() is called here\n");
 		ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
 				 CT_EGRESS, &ct_state_new, ext_err);
 		if (!IS_ERR(ret))
@@ -2663,7 +2664,6 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 #ifndef HAVE_FIB_IFINDEX
 			ct_state.ifindex = (__u16)THIS_INTERFACE_IFINDEX;
 #endif
-
 			ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
 					 CT_EGRESS, &ct_state, ext_err);
 			if (IS_ERR(ret))
