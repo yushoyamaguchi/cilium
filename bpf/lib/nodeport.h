@@ -1797,9 +1797,6 @@ nodeport_extract_dsr_v4(struct __ctx_buff *ctx,
 			 */
 			*dsr = ct_has_dsr_egress_entry4(get_ct_map4(&tmp), &tmp);
 			*port = 0;
-			cilium_dbg(ctx, 69, bpf_htonl(tmp.saddr), bpf_htonl(tmp.daddr));
-			cilium_dbg(ctx, 69, bpf_ntohs(tmp.sport), bpf_ntohs(tmp.dport));
-			cilium_dbg(ctx, 69, tmp.nexthdr, tmp.flags);
 			return 0;
 		}
 	}
@@ -2735,6 +2732,12 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	fraginfo = ipfrag_encode_ipv4(ip4);
 
 	ret = lb4_extract_tuple(ctx, ip4, l3_off, fraginfo, &l4_off, &tuple);
+	printk("just after extract saddr=%x\n", bpf_htonl(tuple.saddr));
+	printk("just after extract daddr=%x\n", bpf_htonl(tuple.daddr));
+	printk("just after extract sport=%d\n", bpf_ntohs(tuple.sport));
+	printk("just after extract dport=%d\n", bpf_ntohs(tuple.dport));
+	cilium_dbg(ctx, 69, bpf_htonl(tuple.saddr), bpf_htonl(tuple.daddr));
+	cilium_dbg(ctx, 69, bpf_ntohs(tuple.sport), bpf_ntohs(tuple.dport));
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			is_svc_proto = false;
