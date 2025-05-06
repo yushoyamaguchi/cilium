@@ -113,18 +113,35 @@ int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
 {
 	void *data, *data_end;
 	__u32 *status_code;
+	struct ct_entry *entry;
+
+	union v6addr backend_ip = BACKEND_IP;
+	union v6addr client_ip  = CLIENT_IP;
+	struct ipv6_ct_tuple expected_tuple = {
+		.saddr   = backend_ip,
+		.daddr   = client_ip,
+		.sport   = CLIENT_PORT,
+		.dport   = BACKEND_PORT,
+		.nexthdr = IPPROTO_TCP,
+		.flags   = TUPLE_F_OUT,
+	};
 
 	test_init();
 
-	data = (void *)(long)ctx_data(ctx);
-	data_end = (void *)(long)ctx->data_end;
+	data      = (void *)(long)ctx_data(ctx);
+	data_end  = (void *)(long)ctx->data_end;
 
 	if (data + sizeof(__u32) > data_end)
 		test_fatal("status code out of bounds");
 
-	/* The packet should be passed to kernel-stack */
+	/* Packet must be passed to the kernel stack */
 	status_code = data;
 	assert(*status_code == CTX_ACT_OK);
+
+	/* Verify that the datapath inserted the conntrack entry */
+	entry = map_lookup_elem(&cilium_ct6_global, &expected_tuple);
+	if (!entry)
+		test_fatal("No entry in conntrack map");
 
 	test_finish();
 }

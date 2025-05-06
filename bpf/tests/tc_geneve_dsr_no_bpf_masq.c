@@ -110,7 +110,7 @@ int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
 	void *data, *data_end;
 	__u32 *status_code;
 	struct ct_entry *entry;
-	struct ipv4_ct_tuple tuple = {
+	struct ipv4_ct_tuple expected_tuple = {
 		.saddr   = BACKEND_IP,
 		.daddr   = CLIENT_IP,
 		.sport   = CLIENT_PORT,
@@ -127,11 +127,12 @@ int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
 	if (data + sizeof(__u32) > data_end)
 		test_fatal("status code out of bounds");
 
-	/* The packet should be passed to kernel-stack */
+	/* The packet must be passed to kernel-stack */
 	status_code = data;
 	assert(*status_code == CTX_ACT_OK);
 
-	entry = map_lookup_elem(&cilium_ct4_global, &tuple);
+	/* Verify that the datapath inserted the conntrack entry */
+	entry = map_lookup_elem(&cilium_ct4_global, &expected_tuple);
 	if (!entry)
 		test_fatal("No entry in conntrack map");
 
