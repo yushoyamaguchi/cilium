@@ -67,8 +67,8 @@ struct {
 	},
 };
 
-PKTGEN("tc", "tc_geneve_dsr_no_bpf_masq")
-int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
+PKTGEN("tc", "tc_geneve_dsr_v6_legacy")
+int tc_geneve_dsr_v6_legacy_pktgen(struct __ctx_buff *ctx)
 {
 	struct pktgen builder;
 	struct tcphdr *l4;
@@ -96,8 +96,8 @@ int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
 	return 0;
 }
 
-SETUP("tc", "tc_geneve_dsr_no_bpf_masq")
-int tc_geneve_dsr_no_bpf_masq_setup(struct __ctx_buff *ctx)
+SETUP("tc", "tc_geneve_dsr_v6_legacy")
+int tc_geneve_dsr_v6_legacy_setup(struct __ctx_buff *ctx)
 {
 	union v6addr backend_ip = BACKEND_IP;
 
@@ -108,8 +108,8 @@ int tc_geneve_dsr_no_bpf_masq_setup(struct __ctx_buff *ctx)
 	return TEST_ERROR;
 }
 
-CHECK("tc", "tc_geneve_dsr_no_bpf_masq")
-int tc_geneve_dsr_no_bpf_masq_check(struct __ctx_buff *ctx)
+CHECK("tc", "tc_geneve_dsr_v6_legacy")
+int tc_geneve_dsr_v6_legacy_check(struct __ctx_buff *ctx)
 {
 	void *data, *data_end;
 	__u32 *status_code;
