@@ -7,7 +7,7 @@
 #include "pktgen.h"
 
 /* Enable code paths under test */
-#define ENABLE_IPV4
+#define ENABLE_IPV6
 
 #define ENABLE_NODEPORT 1
 #define ENABLE_DSR 1
@@ -19,20 +19,20 @@
 #define ENCAP_IFINDEX 42
 #define TUNNEL_MODE
 
-#define CLIENT_IP v4_pod_one
+#define CLIENT_IP { .addr = { 0x1, 0x0, 0x0, 0x0, 0x0, 0x0 } }
 #define CLIENT_PORT __bpf_htons(111)
 
-#define BACKEND_IP		v4_pod_two
+#define BACKEND_IP		{ .addr = { 0x3, 0x0, 0x0, 0x0, 0x0, 0x0 } }
 #define BACKEND_PORT		__bpf_htons(8080)
 
-#define NODE_IP v4_node_one
+#define NODE_IP v6_node_one
 
 static volatile const __u8 *client_mac = mac_one;
 static volatile const __u8 *server_mac = mac_two;
 
 #define skb_get_tunnel_key mock_skb_get_tunnel_key
 int mock_skb_get_tunnel_key(__maybe_unused struct __sk_buff *skb,
-				__maybe_unused  struct bpf_tunnel_key *to,
+                __maybe_unused struct bpf_tunnel_key *to,
 			    __maybe_unused __u32 size,
 			    __maybe_unused __u32 flags)
 {
@@ -43,7 +43,7 @@ int mock_skb_get_tunnel_key(__maybe_unused struct __sk_buff *skb,
 int mock_skb_get_tunnel_opt(__maybe_unused struct __sk_buff *skb,
 			    void *opt, __u32 size)
 {
-	struct geneve_dsr_opt4 *gopt = opt;
+	struct geneve_dsr_opt6 *gopt = opt;
 
 	gopt->hdr.opt_class = bpf_htons(DSR_GENEVE_OPT_CLASS);
 	gopt->hdr.type = DSR_GENEVE_OPT_TYPE;
@@ -73,13 +73,15 @@ int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
 	struct pktgen builder;
 	struct tcphdr *l4;
 	void *data;
+	union v6addr client_ip = CLIENT_IP;
+	union v6addr backend_ip = BACKEND_IP;
 
 	/* Init packet builder */
 	pktgen__init(&builder, ctx);
 
-	l4 = pktgen__push_ipv4_tcp_packet(&builder,
+	l4 = pktgen__push_ipv6_tcp_packet(&builder,
 					  (__u8 *)client_mac, (__u8 *)server_mac,
-					  CLIENT_IP, BACKEND_IP,
+					  (__u8 *)&client_ip, (__u8 *)&backend_ip,
 					  CLIENT_PORT, BACKEND_PORT);
 	if (!l4)
 		return TEST_ERROR;
@@ -97,7 +99,9 @@ int tc_geneve_dsr_no_bpf_masq_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "tc_geneve_dsr_no_bpf_masq")
 int tc_geneve_dsr_no_bpf_masq_setup(struct __ctx_buff *ctx)
 {
-	endpoint_v4_add_entry(BACKEND_IP, 0, 0, 0, 0, 0, NULL, NULL);
+	union v6addr backend_ip = BACKEND_IP;
+
+	endpoint_v6_add_entry(&backend_ip, 0, 0, 0, 0, NULL, NULL);
 	/* Jump into the entrypoint */
 	tail_call_static(ctx, entry_call_map, FROM_OVERLAY);
 	/* Fail if we didn't jump */
