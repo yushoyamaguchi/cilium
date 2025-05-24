@@ -110,8 +110,9 @@ int tc_geneve_dsr_v4_legacy_check(struct __ctx_buff *ctx)
 {
 	void *data, *data_end;
 	__u32 *status_code;
-	struct ct_entry *entry;
-	struct ipv4_ct_tuple expected_tuple = {
+	struct ct_entry *ct_entry;
+	struct ipv4_nat_entry *nat_entry;
+	struct ipv4_ct_tuple expected_tuple_for_ct = {
 		.saddr   = BACKEND_IP,
 		.daddr   = CLIENT_IP,
 		.sport   = CLIENT_PORT,
@@ -119,6 +120,16 @@ int tc_geneve_dsr_v4_legacy_check(struct __ctx_buff *ctx)
 		.nexthdr = IPPROTO_TCP,
 		.flags   = TUPLE_F_OUT,
 	};
+
+	struct ipv4_ct_tuple expected_tuple_for_nat = {
+		.saddr   = BACKEND_IP,
+		.daddr   = CLIENT_IP,
+		.sport   = BACKEND_PORT,
+		.dport   = CLIENT_PORT,
+		.nexthdr = IPPROTO_TCP,
+		.flags   = TUPLE_F_OUT,
+	};
+	
 
 	test_init();
 
@@ -133,9 +144,14 @@ int tc_geneve_dsr_v4_legacy_check(struct __ctx_buff *ctx)
 	assert(*status_code == CTX_ACT_OK);
 
 	/* Verify that the datapath inserted the conntrack entry */
-	entry = map_lookup_elem(&cilium_ct4_global, &expected_tuple);
-	if (!entry)
+	ct_entry = map_lookup_elem(&cilium_ct4_global, &expected_tuple_for_ct);
+	if (!ct_entry)
 		test_fatal("No entry in conntrack map");
+
+	/* Verify that the datapath inserted the SNAT entry */
+	nat_entry = snat_v4_lookup(&expected_tuple_for_nat);
+	if (!nat_entry)
+		test_fatal("No entry in SNAT map");
 
 	test_finish();
 }
