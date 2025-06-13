@@ -317,7 +317,11 @@ require (
 
 // Using private fork of controller-tools. See commit msg for more context
 // as to why we are using a private fork.
-replace sigs.k8s.io/controller-tools => github.com/cilium/controller-tools v0.16.5-1
+replace (
+	github.com/osrg/gobgp/v3 => ../gobgp
+
+	sigs.k8s.io/controller-tools => github.com/cilium/controller-tools v0.16.5-1
+)
 
 tool (
 	github.com/cilium/deepequal-gen

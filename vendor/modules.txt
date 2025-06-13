@@ -1252,7 +1252,7 @@ github.com/opencontainers/image-spec/specs-go/v1
 github.com/opentracing/opentracing-go
 github.com/opentracing/opentracing-go/ext
 github.com/opentracing/opentracing-go/log
-# github.com/osrg/gobgp/v3 v3.37.0
+# github.com/osrg/gobgp/v3 v3.37.0 => ../gobgp
 ## explicit; go 1.23.0
 github.com/osrg/gobgp/v3/api
 github.com/osrg/gobgp/v3/internal/pkg/table
@@ -2842,4 +2842,5 @@ sigs.k8s.io/structured-merge-diff/v4/value
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
 sigs.k8s.io/yaml/goyaml.v3
+# github.com/osrg/gobgp/v3 => ../gobgp
 # sigs.k8s.io/controller-tools => github.com/cilium/controller-tools v0.16.5-1
