@@ -37,6 +37,16 @@
 
 #define fib_lookup mock_fib_lookup
 
+
+#define IP_ENDPOINT 1
+#define IP_HOST     2
+#define IP_ROUTER   3
+#define IP_WORLD    4
+
+#define MTU 1500
+
+static char pkt[100];
+
 static volatile const __u8 *client_mac = mac_one;
 /* this matches the default node_config.h: */
 static volatile const __u8 lb_mac[ETH_ALEN]	= { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x56 };
@@ -283,6 +293,196 @@ int nodeport_local_backend_check(const struct __ctx_buff *ctx)
 
 	test_finish();
 }
+
+__always_inline int mk_icmp4_error_pkt_revnat(void *dst, __u8 error_hdr,
+					      __u32 outer_saddr, __u32 outer_daddr,
+					      __u32 inner_saddr, __u32 inner_daddr,
+					      __u16 inner_sport, __u16 inner_dport)
+{
+	void *orig = dst;
+
+	struct ethhdr l2 = {
+		.h_source = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF},
+		.h_dest = {0x12, 0x23, 0x34, 0x45, 0x56, 0x67},
+		.h_proto = bpf_htons(ETH_P_IP)
+	};
+	memcpy(dst, &l2, sizeof(struct ethhdr));
+	dst += sizeof(struct ethhdr);
+
+	struct iphdr l3 = {
+		.version = 4,
+		.ihl = 5,
+		.ttl = 5,
+		.protocol = IPPROTO_ICMP,
+		.saddr = outer_saddr,
+		.daddr = outer_daddr,
+	};
+	memcpy(dst, &l3, sizeof(struct iphdr));
+	dst += sizeof(struct iphdr);
+
+	struct icmphdr icmphdr __align_stack_8 = {
+		.type           = ICMP_DEST_UNREACH,
+		.code           = ICMP_FRAG_NEEDED,
+		.un = {
+			.frag = {
+				.mtu = bpf_htons(MTU),
+			},
+		},
+	};
+	memcpy(dst, &icmphdr, sizeof(struct icmphdr));
+	dst += sizeof(struct icmphdr);
+
+	struct iphdr inner_l3 = {
+		.version = 4,
+		.ihl = 5,
+		.protocol = error_hdr,
+		.saddr = inner_saddr,
+		.daddr = inner_daddr,
+	};
+	memcpy(dst, &inner_l3, sizeof(struct iphdr));
+	dst += sizeof(struct iphdr);
+
+	switch (error_hdr) {
+	case IPPROTO_TCP: {
+		struct tcphdr inner_l4 = {
+			.source = inner_sport,
+			.dest = inner_dport,
+		};
+		memcpy(dst, &inner_l4, sizeof(struct tcphdr));
+		dst += sizeof(struct tcphdr);
+	}
+		break;
+	case IPPROTO_UDP: {
+		struct udphdr inner_l4 = {
+			.source = inner_sport,
+			.dest = inner_dport,
+		};
+		memcpy(dst, &inner_l4, sizeof(struct udphdr));
+		dst += sizeof(struct udphdr);
+	}
+		break;
+	case IPPROTO_SCTP: {
+		struct {
+			__be16 sport;
+			__be16 dport;
+		} inner_l4;
+
+		inner_l4.sport = inner_sport,
+		inner_l4.dport = inner_dport,
+
+		memcpy(dst, &inner_l4, sizeof(inner_l4));
+		dst += sizeof(inner_l4);
+	}
+		break;
+	case IPPROTO_ICMP: {
+		struct icmphdr inner_l4 __align_stack_8 = {
+			.type = ICMP_ECHOREPLY,
+			.un = {
+				.echo = {
+					.id = inner_sport
+				},
+			},
+		};
+		memcpy(dst, &inner_l4, sizeof(struct icmphdr));
+		dst += sizeof(struct icmphdr);
+	}
+		break;
+	}
+	return (int)(dst - orig);
+}
+
+CHECK("tc", "z_nodeport_rev_dnat_icmp_error_tcp")
+int test_z_nodeport_rev_dnat_icmp_error_tcp(__maybe_unused struct __ctx_buff *ctx)
+{
+	int pkt_size = mk_icmp4_error_pkt_revnat(pkt, IPPROTO_TCP,
+						 BACKEND_IP_LOCAL, CLIENT_IP,
+						 CLIENT_IP, BACKEND_IP_LOCAL,
+						 CLIENT_PORT, BACKEND_PORT);
+	{
+		void *data = (void *)(long)ctx->data;
+		void *data_end = (void *)(long)ctx->data_end;
+
+		if (data + pkt_size > data_end)
+			return TEST_ERROR;
+
+		memcpy(data, pkt, pkt_size);
+	}
+
+	test_init();
+	/* The test is validating that the function nodeport_rev_dnat_ipv4()
+	 * will rev-NAT the embedded packet in an ICMP Unreach error.
+	 * The original connection was from CLIENT_IP:CLIENT_PORT to
+	 * FRONTEND_IP_LOCAL:FRONTEND_PORT, which was DNATed to
+	 * CLIENT_IP:CLIENT_PORT to BACKEND_IP_LOCAL:BACKEND_PORT.
+	 * The ICMP error is generated for a reply from BACKEND_IP_LOCAL:BACKEND_PORT
+	 * to CLIENT_IP:CLIENT_PORT.
+	 * After rev-NAT, the inner packet should be FRONTEND_IP_LOCAL:FRONTEND_PORT
+	 * to CLIENT_IP:CLIENT_PORT.
+	 */
+
+	int ret;
+	struct trace_ctx trace;
+	__s8 ext_err = 0;
+
+	/* This is the entry-point of the test, calling
+	 * nodeport_rev_dnat_ipv4().
+	 */
+	ret = nodeport_rev_dnat_ipv4(ctx, &trace, &ext_err);
+	assert(ret == CTX_ACT_REDIRECT);
+
+	__u16 proto;
+	void *data;
+	void *data_end;
+
+	int l3_off;
+	int l4_off;
+	struct iphdr *ip4;
+	struct icmphdr icmphdr __align_stack_8;
+
+	assert(validate_ethertype(ctx, &proto));
+	assert(revalidate_data(ctx, &data, &data_end, &ip4));
+	if (data + pkt_size > data_end)
+		test_fatal("packet shrank");
+
+	/* Validating outer headers */
+	assert(ip4->protocol == IPPROTO_ICMP);
+	assert(ip4->saddr == FRONTEND_IP_REMOTE);
+	assert(ip4->daddr == CLIENT_IP);
+
+	l3_off = ETH_HLEN;
+	l4_off = l3_off + ipv4_hdrlen(ip4);
+	if (ctx_load_bytes(ctx, l4_off, &icmphdr, sizeof(icmphdr)) < 0)
+		test_fatal("can't load icmp headers");
+	assert(icmphdr.type == ICMP_DEST_UNREACH);
+	assert(icmphdr.code == ICMP_FRAG_NEEDED);
+
+	/* Validating inner headers */
+	int in_l3_off;
+	int in_l4_off;
+	struct iphdr in_ip4;
+	struct {
+		__be16 sport;
+		__be16 dport;
+	} in_l4hdr;
+
+	in_l3_off = l4_off + sizeof(icmphdr);
+	if (ctx_load_bytes(ctx, in_l3_off, &in_ip4,
+			   sizeof(in_ip4)) < 0)
+		test_fatal("can't load embedded ip headers");
+	assert(in_ip4.protocol == IPPROTO_TCP);
+	assert(in_ip4.saddr == CLIENT_IP);
+	assert(in_ip4.daddr == BACKEND_IP_LOCAL);
+
+	in_l4_off = in_l3_off + ipv4_hdrlen(&in_ip4);
+	if (ctx_load_bytes(ctx, in_l4_off, &in_l4hdr, sizeof(in_l4hdr)) < 0)
+		test_fatal("can't load embedded l4 headers");
+	assert(in_l4hdr.sport == CLIENT_PORT);
+	assert(in_l4hdr.dport == BACKEND_PORT);
+
+	test_finish();
+}
+
+
 
 /* Test that a reply by the local backend gets revDNATed at to-netdev. */
 PKTGEN("tc", "tc_nodeport_local_backend_reply")
