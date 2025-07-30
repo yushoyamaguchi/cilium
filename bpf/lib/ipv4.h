@@ -4,6 +4,7 @@
 #pragma once
 
 #include <linux/ip.h>
+#include <linux/icmp.h>
 
 #include "dbg.h"
 #include "l4.h"
@@ -79,6 +80,49 @@ static __always_inline int ipv4_hdrlen(const struct iphdr *ip4)
 	return ip4->ihl * 4;
 }
 
+static __always_inline int l4_load_ports_icmp_error(struct __ctx_buff *ctx, int l4_off,
+					      __be16 *ports, __u8 *nexthdr)
+{
+	struct iphdr inner_iphdr;
+	__u32 inner_l3_off, inner_l4_off;
+	__be16 inner_ports[2];
+	int ret;
+
+	/* Extract the original packet header from the ICMP payload */
+	/* Calculate inner L4 header offset*/
+	inner_l3_off = (__u32)(l4_off + sizeof(struct icmphdr));
+	ret = ctx_load_bytes(ctx, inner_l3_off, &inner_iphdr, sizeof(inner_iphdr));
+	if (ret < 0)
+		return ret;
+	*nexthdr = inner_iphdr.protocol;
+	inner_l4_off = inner_l3_off + ipv4_hdrlen(&inner_iphdr);
+
+	/* Load the inner L4 ports */
+	ret = ctx_load_bytes(ctx, inner_l4_off, inner_ports, sizeof(inner_ports));
+	if (ret < 0)
+		return ret;
+
+	/* Reverse the ports: original src becomes dst, original dst becomes src */
+	ports[0] = inner_ports[1];  /* sport = original dport */
+	ports[1] = inner_ports[0];  /* dport = original sport */
+
+	return 0;
+}
+
+static __always_inline bool revnat_required_icmp_type(__u8 icmp_type)
+{
+	switch (icmp_type) {
+	case ICMP_DEST_UNREACH:
+	case ICMP_SOURCE_QUENCH:
+	case ICMP_REDIRECT:
+	case ICMP_TIME_EXCEEDED:
+	case ICMP_PARAMETERPROB:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static __always_inline bool ipv4_is_in_subnet(__be32 addr,
 					      __be32 subnet, int prefixlen)
 {
@@ -126,6 +170,49 @@ ipv4_handle_fragmentation(struct __ctx_buff *ctx,
 	if (unlikely(ipfrag_is_fragment(fraginfo))) {
 		/* First logical fragment for this datagram (not necessarily the first
 		 * we receive). Fragment has L4 header, create an entry in datagrams map.
+		 * For ICMP errors, ports are already reversed by l4_load_ports_icmp_error().
+		 */
+		if (map_update_elem(&cilium_ipv4_frag_datagrams, &frag_id, ports, BPF_ANY))
+			update_metrics(ctx_full_len(ctx), ct_to_metrics_dir(ct_dir),
+				       REASON_FRAG_PACKET_UPDATE);
+
+		/* Do not return an error if map update failed, as nothing prevents us
+		 * to process the current packet normally.
+		 */
+	}
+
+	return 0;
+}
+
+
+static __always_inline int
+ipv4_handle_fragmentation_icmp_error(struct __ctx_buff *ctx,
+			  const struct iphdr *ip4,
+			  fraginfo_t fraginfo,
+			  int l4_off,
+			  enum ct_dir ct_dir,
+			  struct ipv4_frag_l4ports *ports,
+			  __u8 *nexthdr)
+{
+	struct ipv4_frag_id frag_id = {
+		.daddr = ip4->daddr,
+		.saddr = ip4->saddr,
+		.id = (__be16)ipfrag_get_id(fraginfo),
+		.proto = ipfrag_get_protocol(fraginfo),
+	};
+
+	if (unlikely(!ipfrag_has_l4_header(fraginfo)))
+		return ipv4_frag_get_l4ports(&frag_id, ports);
+
+	/* load sport + dport + protocol into tuple */
+	if (l4_load_ports_icmp_error(ctx, l4_off, (__be16 *)ports, nexthdr) < 0)
+		return DROP_CT_INVALID_HDR;
+
+
+	if (unlikely(ipfrag_is_fragment(fraginfo))) {
+		/* First logical fragment for this datagram (not necessarily the first
+		 * we receive). Fragment has L4 header, create an entry in datagrams map.
+		 * For ICMP errors, ports are already reversed by l4_load_ports_icmp_error().
 		 */
 		if (map_update_elem(&cilium_ipv4_frag_datagrams, &frag_id, ports, BPF_ANY))
 			update_metrics(ctx_full_len(ctx), ct_to_metrics_dir(ct_dir),
@@ -152,6 +239,24 @@ ipv4_load_l4_ports(struct __ctx_buff *ctx, struct iphdr *ip4 __maybe_unused,
 	if (unlikely(!ipfrag_has_l4_header(fraginfo)))
 		return DROP_FRAG_NOSUPPORT;
 	if (l4_load_ports(ctx, l4_off, ports) < 0)
+		return DROP_CT_INVALID_HDR;
+#endif
+
+	return 0;
+}
+
+static __always_inline int
+ipv4_load_l4_ports_from_icmp_error(struct __ctx_buff *ctx, struct iphdr *ip4 __maybe_unused,
+				    fraginfo_t fraginfo __maybe_unused, int l4_off,
+				    enum ct_dir dir __maybe_unused, __be16 *ports, __u8 *nexthdr)
+{
+#ifdef ENABLE_IPV4_FRAGMENTS
+	return ipv4_handle_fragmentation_icmp_error(ctx, ip4, fraginfo, l4_off, dir,
+					 (struct ipv4_frag_l4ports *)ports, nexthdr);
+#else
+	if (unlikely(!ipfrag_has_l4_header(fraginfo)))
+		return DROP_FRAG_NOSUPPORT;
+	if (l4_load_ports_icmp_error(ctx, l4_off, ports, nexthdr) < 0)
 		return DROP_CT_INVALID_HDR;
 #endif
 

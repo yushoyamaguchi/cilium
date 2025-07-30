@@ -1743,7 +1743,7 @@ static __always_inline int encap_geneve_dsr_opt4(struct __ctx_buff *ctx, int l3_
 		fraginfo = ipfrag_encode_ipv4(ip4);
 		l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
-		ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
+		ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple, false);
 		if (IS_ERR(ret))
 			return ret;
 
@@ -2239,6 +2239,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	fraginfo_t fraginfo;
 	__u32 *vrf_id __maybe_unused = NULL;
 	__u32 monitor = 0;
+	bool include_l4 = false;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -2246,7 +2247,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	fraginfo = ipfrag_encode_ipv4(ip4);
 	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
-	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple, true);
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
@@ -2279,8 +2280,11 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
+		if (ip4->protocol != IPPROTO_ICMP) {
+			include_l4 = ipfrag_has_l4_header(fraginfo);
+		}
 		ret = lb4_rev_nat(ctx, l3_off, l4_off, ct_state.rev_nat_index, false,
-				  &tuple, ipfrag_has_l4_header(fraginfo));
+				  &tuple, include_l4);
 		if (IS_ERR(ret))
 			return ret;
 		if (!revalidate_data(ctx, &data, &data_end, &ip4))
@@ -2558,7 +2562,7 @@ int tail_nodeport_nat_egress_ipv4(struct __ctx_buff *ctx)
 	}
 #endif
 
-	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple, false);
 	if (IS_ERR(ret))
 		goto drop_err;
 
@@ -2822,7 +2826,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	fraginfo = ipfrag_encode_ipv4(ip4);
 	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
-	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple, false);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			is_svc_proto = false;

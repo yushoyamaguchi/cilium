@@ -271,7 +271,7 @@ int nodeport_dsr_backend_check(struct __ctx_buff *ctx)
 	l3_off = sizeof(*status_code) + ETH_HLEN;
 	l4_off = l3_off + ipv4_hdrlen(l3);
 
-	ret = lb4_extract_tuple(ctx, l3, ipfrag_encode_ipv4(l3), l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, l3, ipfrag_encode_ipv4(l3), l4_off, &tuple, false);
 	assert(!IS_ERR(ret));
 
 	tuple.flags = TUPLE_F_IN;
@@ -548,7 +548,7 @@ int nodeport_dsr_backend_redirect_check(struct __ctx_buff *ctx)
 	l3_off = sizeof(*status_code) + ETH_HLEN;
 	l4_off = l3_off + ipv4_hdrlen(l3);
 
-	ret = lb4_extract_tuple(ctx, l3, ipfrag_encode_ipv4(l3), l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, l3, ipfrag_encode_ipv4(l3), l4_off, &tuple, false);
 	assert(!IS_ERR(ret));
 
 	tuple.flags = TUPLE_F_IN;

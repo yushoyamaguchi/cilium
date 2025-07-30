@@ -1316,7 +1316,7 @@ lb4_fill_key(struct lb4_key *key, const struct ipv4_ct_tuple *tuple)
  */
 static __always_inline int
 lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo,
-		  int l4_off, struct ipv4_ct_tuple *tuple)
+		  int l4_off, struct ipv4_ct_tuple *tuple, bool include_icmp_error)
 {
 	tuple->nexthdr = ip4->protocol;
 	tuple->daddr = ip4->daddr;
@@ -1330,8 +1330,17 @@ lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo
 #endif  /* ENABLE_SCTP */
 		return ipv4_load_l4_ports(ctx, ip4, fraginfo, l4_off,
 					  CT_EGRESS, &tuple->dport);
-	case IPPROTO_ICMP:
+	case IPPROTO_ICMP: {
+		__u8 icmp_type;
+		if (ctx_load_bytes(ctx, l4_off, &icmp_type, sizeof(icmp_type)) < 0)
+			return DROP_INVALID;
+			
+		if (include_icmp_error && revnat_required_icmp_type(icmp_type)) {
+			return ipv4_load_l4_ports_from_icmp_error(ctx, ip4, fraginfo, l4_off,
+								  CT_EGRESS, &tuple->dport, &tuple->nexthdr);
+		}
 		return DROP_UNSUPP_SERVICE_PROTO;
+	}
 	default:
 		return DROP_UNKNOWN_L4;
 	}
