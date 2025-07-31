@@ -1195,6 +1195,46 @@ pktgen__tcp_csum(const struct pktgen *builder, int i, struct tcphdr *tcp_layer)
 	}
 }
 
+static __always_inline void
+pktgen__icmp4_csum(const struct pktgen *builder, int i, struct icmphdr *icmp_layer)
+{
+	if (i == 0)
+		return;
+
+	if (builder->layers[i - 1] == PKT_LAYER_IPV4) {
+		__u64 len;
+		__u32 csum;
+
+		icmp_layer->checksum = 0;
+		len = builder->cur_off - builder->layer_offsets[i];
+		if ((void *)icmp_layer + len > ctx_data_end(builder->ctx))
+			return;
+
+		csum = csum_diff(NULL, 0, icmp_layer, (__u32) len, 0);
+		icmp_layer->checksum = csum_fold(csum);
+	}
+}
+
+static __always_inline void pktgen__finish_icmp4(const struct pktgen *builder, int i)
+{
+	struct icmphdr *icmp_layer;
+	__u64 layer_off;
+
+	layer_off = builder->layer_offsets[i];
+	/* Check that any value within the struct will not exceed a u16 which
+	 * is the max allowed offset within a packet from ctx->data.
+	 */
+	if (layer_off >= MAX_PACKET_OFF - sizeof(struct icmphdr))
+		return;
+
+	icmp_layer = ctx_data(builder->ctx) + layer_off;
+	if ((void *)icmp_layer + sizeof(struct icmphdr) >
+		ctx_data_end(builder->ctx))
+		return;
+
+	pktgen__icmp4_csum(builder, i, icmp_layer);
+}
+
 static __always_inline void pktgen__finish_tcp(const struct pktgen *builder, int i)
 {
 	struct tcphdr *tcp_layer;
@@ -1336,7 +1376,7 @@ void pktgen__finish(const struct pktgen *builder)
 			break;
 
 		case PKT_LAYER_ICMP:
-			/* TODO implement checksum calc? */
+			pktgen__finish_icmp4(builder, i);
 			break;
 
 		case PKT_LAYER_ICMPV6:
