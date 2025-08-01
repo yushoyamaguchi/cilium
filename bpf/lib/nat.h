@@ -972,6 +972,9 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	__u16 port_off;
 	__u32 icmpoff;
 	__u8 type;
+	__u32 outer_icmp_off;
+	__wsum diff;
+	int ret;
 
 	/* According to the RFC 5508, any networking equipment that is
 	 * responding with an ICMP Error packet should embed the original
@@ -1032,9 +1035,27 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 		return NAT_PUNT_TO_STACK;
 
 	/* The embedded packet was SNATed on egress. Reverse it again: */
-	return snat_v4_rewrite_headers(ctx, tuple.nexthdr, (int)inner_l3_off, true, icmpoff,
+	ret = snat_v4_rewrite_headers(ctx, tuple.nexthdr, (int)inner_l3_off, true, icmpoff,
 				       tuple.daddr, (*state)->to_daddr, IPV4_SADDR_OFF,
 				       tuple.dport, (*state)->to_dport, port_off);
+	if (IS_ERR(ret)) 
+		return ret;
+	
+	outer_icmp_off = (int)inner_l3_off - (int)sizeof(struct icmphdr);
+	diff = csum_diff(&tuple.daddr, 4, &(*state)->to_daddr, 4, 0);
+	if (tuple.dport != (*state)->to_dport)
+		diff = csum_diff(&tuple.dport, 2, &(*state)->to_dport, 2, diff);
+	if (diff) {
+		struct csum_offset csum = {
+			.offset = offsetof(struct icmphdr, checksum),
+			.flags = 0,
+		};
+
+		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, diff, 0) < 0)
+			return DROP_CSUM_L4;
+	}
+	return 0;
+
 }
 
 static __always_inline __maybe_unused int
