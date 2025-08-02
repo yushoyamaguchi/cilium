@@ -962,6 +962,27 @@ nat_icmp_v4:
 	return __snat_v4_nat(ctx, tuple, fraginfo, off, false, target, port_off, trace, ext_err);
 }
 
+static __always_inline bool
+snat_v4_confirm_icmp_checksum(struct __ctx_buff *ctx, __u32 outer_icmp_off)
+{
+	struct icmphdr icmphdr __align_stack_8;
+	__sum16 stored_csum;
+	bool csum_matched=false;
+
+	if (ctx_load_bytes(ctx, outer_icmp_off, &icmphdr, sizeof(icmphdr)) < 0)
+		return false;
+
+	stored_csum = icmphdr.checksum;
+	icmphdr.checksum = 0;
+
+	if (stored_csum == csum_fold(csum_diff(NULL, 0, &icmphdr, sizeof(icmphdr), 0))) {
+		csum_matched = true;
+	}
+	icmphdr.checksum = stored_csum;
+	return csum_matched;
+}
+
+
 static __always_inline __maybe_unused int
 snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 				  __u64 inner_l3_off,
@@ -972,7 +993,7 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	__u16 port_off;
 	__u32 icmpoff;
 	__u8 type;
-	__u32 outer_icmp_off;
+	__u32 outer_icmp_off = (int)inner_l3_off - (int)sizeof(struct icmphdr);;
 	__wsum diff;
 	int ret;
 
@@ -1041,7 +1062,6 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	if (IS_ERR(ret)) 
 		return ret;
 	
-	outer_icmp_off = (int)inner_l3_off - (int)sizeof(struct icmphdr);
 	diff = csum_diff(&tuple.daddr, 4, &(*state)->to_daddr, 4, 0);
 	if (tuple.dport != (*state)->to_dport)
 		diff = csum_diff(&tuple.dport, 2, &(*state)->to_dport, 2, diff);
@@ -1054,8 +1074,11 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, diff, 0) < 0)
 			return DROP_CSUM_L4;
 	}
-	return 0;
 
+	if (!snat_v4_confirm_icmp_checksum(ctx, outer_icmp_off)) {
+		return DROP_CSUM_L4;
+	}
+	return 0;
 }
 
 static __always_inline __maybe_unused int
