@@ -1132,10 +1132,6 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, diff, 0) < 0)
 			return DROP_CSUM_L4;
 	}
-
-	if (!snat_v4_confirm_icmp_checksum(ctx, outer_icmp_off)) {
-		return DROP_CSUM_L4;
-	}
 	return 0;
 }
 
