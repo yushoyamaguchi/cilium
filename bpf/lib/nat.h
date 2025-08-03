@@ -967,21 +967,75 @@ snat_v4_confirm_icmp_checksum(struct __ctx_buff *ctx, __u32 outer_icmp_off)
 {
 	struct icmphdr icmphdr __align_stack_8;
 	__sum16 stored_csum;
-	bool csum_matched=false;
+	__u32 sum = 0;
+	void *data = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
+	void *icmp_start;
+	__u32 icmp_len; /* ヘッダ+ペイロードの実長 */
+	int i;
+	int max_length = 512;
 
+	/* ICMP ヘッダを読み込み */
 	if (ctx_load_bytes(ctx, outer_icmp_off, &icmphdr, sizeof(icmphdr)) < 0)
 		return false;
 
 	stored_csum = icmphdr.checksum;
-	icmphdr.checksum = 0;
+	icmphdr.checksum = 0; /* 計算時は 0 にする */
 
-	if (stored_csum == csum_fold(csum_diff(NULL, 0, &icmphdr, sizeof(icmphdr), 0))) {
-		csum_matched = true;
+	/* ICMP 開始位置と実際の ICMP 長（data_end まで）を計算 */
+	icmp_start = data + outer_icmp_off;
+	if (icmp_start > data_end)
+		return false;
+	icmp_len = (__u32)((unsigned long)data_end - (unsigned long)icmp_start);
+
+	/* 固定上限超えは即 false */
+	if (icmp_len > (__u32) max_length)
+		return false;
+
+	/* 固定回数のループ。実長外は加算しない（0扱い）。 */
+	for (i = 0; i < max_length; i += 2) {
+		__u16 word = 0;
+
+		if (i + 1 < (int)sizeof(icmphdr)) {
+			/* ヘッダ領域：ローカルコピー（checksum は 0 済み）から */
+			__u8 *b = (__u8 *)&icmphdr;
+			word = (__u16)(((__u32)b[i] << 8) | (__u32)b[i + 1]);
+		} else if (i < (int)sizeof(icmphdr)) {
+			/* ヘッダ末尾が奇数の場合 */
+			__u8 *b = (__u8 *)&icmphdr;
+			word = (__u16)((__u32)b[i] << 8);
+		} else if (i < (int)icmp_len) {
+			/* ペイロード：逐次 1〜2B 読み込み */
+			__u8 b0 = 0, b1 = 0;
+			if (ctx_load_bytes(ctx, outer_icmp_off + i, &b0, 1) < 0)
+				return false;
+			if (i + 1 < (int)icmp_len) {
+				if (ctx_load_bytes(ctx, outer_icmp_off + i + 1, &b1, 1) < 0)
+					return false;
+				word = (__u16)((__u32)b0 << 8 | (__u32)b1);
+			} else {
+				word = (__u16)((__u32)b0 << 8);
+			}
+		} else {
+			break;
+		}
+
+		sum += word;
+		/* 途中で適宜キャリー折り畳み（オーバーフローを抑える） */
+		sum = (sum & 0xFFFF) + (sum >> 16);
 	}
-	icmphdr.checksum = stored_csum;
-	return csum_matched;
-}
 
+	/* 最終キャリー折り畳み */
+	while (sum >> 16)
+		sum = (sum & 0xFFFF) + (sum >> 16);
+
+	/* 1 の補数 */
+	__sum16 calculated_csum = (__sum16)~sum;
+
+	/* 比較（stored_csum はヘッダ側に保持） */
+	icmphdr.checksum = stored_csum;
+	return stored_csum == calculated_csum;
+}
 
 static __always_inline __maybe_unused int
 snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
