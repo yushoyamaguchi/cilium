@@ -522,6 +522,73 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 	return 0;
 }
 
+static __always_inline int
+snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
+			bool has_l4_header, int l4_off,
+			__be32 old_addr, __be32 new_addr, __u16 addr_off,
+			__be16 old_port, __be16 new_port, __u16 port_off)
+{
+	__wsum sum;
+	int err;
+
+	/* No change needed: */
+	if (old_addr == new_addr && old_port == new_port)
+		return 0;
+
+	sum = csum_diff(&old_addr, 4, &new_addr, 4, 0);
+	if (ctx_store_bytes(ctx, l3_off + addr_off, &new_addr, 4, 0) < 0)
+		return DROP_WRITE_ERROR;
+
+	if (has_l4_header) {
+		int flags = BPF_F_PSEUDO_HDR;
+		struct csum_offset csum = {};
+
+		csum_l4_offset_and_flags(nexthdr, &csum);
+
+		if (old_port != new_port) {
+			switch (nexthdr) {
+			case IPPROTO_TCP:
+			case IPPROTO_UDP:
+				break;
+#ifdef ENABLE_SCTP
+			case IPPROTO_SCTP:
+				return DROP_CSUM_L4;
+#endif  /* ENABLE_SCTP */
+			case IPPROTO_ICMP:
+				/* Not initialized by csum_l4_offset_and_flags(), because ICMPv4
+				 * doesn't use a pseudo-header, and the change in IP addresses is
+				 * not supposed to change the L4 checksum.
+				 * Set it temporarily to amend the checksum after changing ports.
+				 */
+				csum.offset = offsetof(struct icmphdr, checksum);
+				break;
+			default:
+				return DROP_UNKNOWN_L4;
+			}
+
+			/* Amend the L4 checksum due to changing the ports. */
+			err = l4_modify_port(ctx, l4_off, port_off, &csum, new_port, old_port);
+			if (err < 0)
+				return err;
+
+			/* Restore the original offset. */
+			if (nexthdr == IPPROTO_ICMP)
+				csum.offset = 0;
+		}
+
+		/* Amend the L4 checksum due to changing the addresses. */
+		if (csum.offset &&
+		    csum_l4_replace(ctx, l4_off, &csum, 0, sum, flags) < 0)
+			return DROP_CSUM_L4;
+	}
+
+	/* Amend the L3 checksum due to changing the addresses. */
+	if (ipv4_csum_update_by_diff(ctx, l3_off, sum) < 0)
+		return DROP_CSUM_L3;
+
+	return 0;
+}
+
 static __always_inline bool
 snat_v4_nat_can_skip(const struct ipv4_nat_target *target,
 		     const struct ipv4_ct_tuple *tuple)
