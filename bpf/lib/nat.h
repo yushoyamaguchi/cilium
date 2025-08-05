@@ -1220,15 +1220,12 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 		return NAT_PUNT_TO_STACK;
 
 	/* The embedded packet was SNATed on egress. Reverse it again: */
-	ret = snat_v4_rewrite_headers(ctx, tuple.nexthdr, (int)inner_l3_off, true, icmpoff,
+	ret = snat_v4_rewrite_inner_headers(ctx, tuple.nexthdr, (int)inner_l3_off, true, icmpoff,
 				       tuple.daddr, (*state)->to_daddr, IPV4_SADDR_OFF,
-				       tuple.dport, (*state)->to_dport, port_off);
+				       tuple.dport, (*state)->to_dport, port_off, &diff);
 	if (IS_ERR(ret)) 
 		return ret;
 	
-	diff = csum_diff(&tuple.daddr, 4, &(*state)->to_daddr, 4, 0);
-	if (tuple.dport != (*state)->to_dport)
-		diff = csum_diff(&tuple.dport, 2, &(*state)->to_dport, 2, diff);
 	if (diff) {
 		struct csum_offset csum = {
 			.offset = offsetof(struct icmphdr, checksum),
