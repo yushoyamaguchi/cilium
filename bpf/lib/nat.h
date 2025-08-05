@@ -529,26 +529,43 @@ static __always_inline int
 snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			bool has_l4_header, int l4_off,
 			__be32 old_addr, __be32 new_addr, __u16 addr_off,
-			__be16 old_port, __be16 new_port, __u16 port_off)
+			__be16 old_port, __be16 new_port, __u16 port_off,
+			__wsum *outer_icmp_payload_diff)
 {
 	__wsum sum;
 	int err;
 
+	__wsum payload_diff = 0; /* ICMP payloadへの変更分の差分 */
+
+	__sum16 old_ip_csum = 0, new_ip_csum = 0;
+	__sum16 old_l4_csum = 0, new_l4_csum = 0;
+
 	/* No change needed: */
-	if (old_addr == new_addr && old_port == new_port)
+	if (old_addr == new_addr && old_port == new_port) {
+		if (outer_icmp_payload_diff)
+			*outer_icmp_payload_diff = 0;
 		return 0;
+	}
 
 	sum = csum_diff(&old_addr, 4, &new_addr, 4, 0);
+	payload_diff = csum_diff(&old_addr, 4, &new_addr, 4, payload_diff);
+
+	/* L3ヘッダの元のチェックサムを取得 */
+	if (ctx_load_bytes(ctx, l3_off + offsetof(struct iphdr, check),
+			   &old_ip_csum, sizeof(old_ip_csum)) < 0)
+		return DROP_INVALID;
+
 	if (ctx_store_bytes(ctx, l3_off + addr_off, &new_addr, 4, 0) < 0)
 		return DROP_WRITE_ERROR;
 
 	if (has_l4_header) {
 		int flags = BPF_F_PSEUDO_HDR;
 		struct csum_offset csum = {};
+		bool do_port_rewrite = old_port != new_port;
 
 		csum_l4_offset_and_flags(nexthdr, &csum);
 
-		if (old_port != new_port) {
+		if (do_port_rewrite) {
 			switch (nexthdr) {
 			case IPPROTO_TCP:
 			case IPPROTO_UDP:
@@ -558,15 +575,19 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 				return DROP_CSUM_L4;
 #endif  /* ENABLE_SCTP */
 			case IPPROTO_ICMP:
-				/* Not initialized by csum_l4_offset_and_flags(), because ICMPv4
-				 * doesn't use a pseudo-header, and the change in IP addresses is
-				 * not supposed to change the L4 checksum.
-				 * Set it temporarily to amend the checksum after changing ports.
-				 */
 				csum.offset = offsetof(struct icmphdr, checksum);
 				break;
 			default:
 				return DROP_UNKNOWN_L4;
+			}
+
+			payload_diff = csum_diff(&old_port, 2, &new_port, 2, payload_diff);
+
+			/* L4チェックサムの元の値を取得 */
+			if (csum.offset) {
+				if (ctx_load_bytes(ctx, l4_off + csum.offset,
+						   &old_l4_csum, sizeof(old_l4_csum)) < 0)
+					return DROP_INVALID;
 			}
 
 			/* Amend the L4 checksum due to changing the ports. */
@@ -577,17 +598,39 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			/* Restore the original offset. */
 			if (nexthdr == IPPROTO_ICMP)
 				csum.offset = 0;
+
+			/* new_l4_csum を計算 (port変更のみ反映) */
+			if (old_l4_csum != 0) {
+				__wsum port_diff = csum_diff(&old_port, 2, &new_port, 2, 0);
+				new_l4_csum = csum_fold(csum_add((__wsum)~old_l4_csum, port_diff));
+			}
+		} else {
+			if (csum.offset && ctx_load_bytes(ctx, l4_off + csum.offset,
+							  &old_l4_csum, sizeof(old_l4_csum)) < 0)
+				return DROP_INVALID;
+			new_l4_csum = old_l4_csum;
 		}
 
 		/* Amend the L4 checksum due to changing the addresses. */
 		if (csum.offset &&
 		    csum_l4_replace(ctx, l4_off, &csum, 0, sum, flags) < 0)
 			return DROP_CSUM_L4;
+
+		if (csum.offset && old_l4_csum != 0) {
+			new_l4_csum = csum_fold(csum_add((__wsum)~new_l4_csum, sum));
+			payload_diff = csum_diff(&old_l4_csum, 2, &new_l4_csum, 2, payload_diff);
+		}
 	}
 
 	/* Amend the L3 checksum due to changing the addresses. */
 	if (ipv4_csum_update_by_diff(ctx, l3_off, sum) < 0)
 		return DROP_CSUM_L3;
+
+	new_ip_csum = csum_fold(csum_add((__wsum)~old_ip_csum, sum));
+	payload_diff = csum_diff(&old_ip_csum, 2, &new_ip_csum, 2, payload_diff);
+
+	if (outer_icmp_payload_diff)
+		*outer_icmp_payload_diff = payload_diff;
 
 	return 0;
 }
