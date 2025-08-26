@@ -527,7 +527,7 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			bool has_l4_header, int l4_off,
 			__be32 old_addr, __be32 new_addr, __u16 addr_off,
 			__be16 old_port, __be16 new_port, __u16 port_off,
-			__wsum *outer_icmp_payload_diff)
+			__u32 outer_icmp_off)
 {
 	__wsum sum;
 	int err;
@@ -540,8 +540,6 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 
 	/* No change needed: */
 	if (old_addr == new_addr && old_port == new_port) {
-		if (outer_icmp_payload_diff)
-			*outer_icmp_payload_diff = 0;
 		return 0;
 	}
 
@@ -659,8 +657,15 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 					 &new_ip_csum_be_wire, 2, payload_diff);
 	}
 
-	if (outer_icmp_payload_diff)
-		*outer_icmp_payload_diff = payload_diff;
+	/* outer_icmp_offが有効かつpayload_diffが非0なら、外側ICMP checksum修正 */
+	if (outer_icmp_off && payload_diff) {
+		struct csum_offset csum = {
+			.offset = offsetof(struct icmphdr, checksum),
+			.flags = 0,
+		};
+		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, payload_diff, 0) < 0)
+			return DROP_CSUM_L4;
+	}
 
 	return 0;
 }
@@ -1195,7 +1200,6 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	__u32 icmpoff;
 	__u8 type;
 	__u32 outer_icmp_off = (int)inner_l3_off - (int)sizeof(struct icmphdr);;
-	__wsum diff;
 	int ret;
 
 	/* According to the RFC 5508, any networking equipment that is
@@ -1259,20 +1263,8 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	/* The embedded packet was SNATed on egress. Reverse it again: */
 	ret = snat_v4_rewrite_inner_headers(ctx, tuple.nexthdr, (int)inner_l3_off, true, icmpoff,
 				       tuple.daddr, (*state)->to_daddr, IPV4_SADDR_OFF,
-				       tuple.dport, (*state)->to_dport, port_off, &diff);
-	if (IS_ERR(ret)) 
-		return ret;
-	
-	if (diff) {
-		struct csum_offset csum = {
-			.offset = offsetof(struct icmphdr, checksum),
-			.flags = 0,
-		};
-
-		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, diff, 0) < 0)
-			return DROP_CSUM_L4;
-	}
-	return 0;
+				       tuple.dport, (*state)->to_dport, port_off, outer_icmp_off);
+	return ret;
 }
 
 static __always_inline __maybe_unused int
