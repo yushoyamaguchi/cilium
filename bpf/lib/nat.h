@@ -530,7 +530,10 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			__u32 outer_icmp_off)
 {
 	__wsum sum;
+	__wsum sum2;
 	int err;
+	__u32 from;
+	__u32 to;
 
 	__wsum payload_diff = 0; /* ICMP payloadへの変更分の差分 */
 
@@ -544,8 +547,11 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 	}
 
 	/* アドレス変更の差分（on-wire の 32bit ワード差分としてOK） */
+	__be32 old_addr_host = bpf_ntohl(old_addr);
+	__be32 new_addr_host = bpf_ntohl(new_addr);
 	sum = csum_diff(&old_addr, 4, &new_addr, 4, 0);
-	payload_diff = csum_diff(&old_addr, 4, &new_addr, 4, payload_diff);
+	sum2 = csum_diff(&old_addr_host, 4, &new_addr_host, 4, 0);
+	payload_diff = csum_diff(&old_addr_host, 4, &new_addr_host, 4, payload_diff);
 
 	/* L3ヘッダの元のチェックサム（BE で読み→ホストに直す） */
 	{
@@ -594,7 +600,9 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			}
 
 			/* payload_diff に “ポート値が変わった 2 バイト（BE）” の差分を積む */
-			payload_diff = csum_diff(&old_port, 2, &new_port, 2, payload_diff);
+			from = (__u32)bpf_ntohs(old_port);
+			to = (__u32)bpf_ntohs(new_port);
+			payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 
 			/* ポート書き換え（実データと L4 チェックサムの更新） */
 			err = l4_modify_port(ctx, l4_off, port_off, &csum, new_port, old_port);
@@ -607,7 +615,9 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 
 			/* new_l4_csum_host を “ポート変更のみ反映” で一旦計算（ホスト順序） */
 			if (old_l4_csum_host != 0) {
-				__wsum port_diff = csum_diff(&old_port, 2, &new_port, 2, 0);
+				from = (__u32)bpf_ntohs(old_port);
+				to = (__u32)bpf_ntohs(new_port);
+				__wsum port_diff = csum_diff(&from, 4, &to, 4, 0);
 				new_l4_csum_host = csum_fold(csum_add((__wsum)~old_l4_csum_host, port_diff));
 			} else {
 				new_l4_csum_host = old_l4_csum_host; /* 0(=UDPで未使用)は維持 */
@@ -635,12 +645,11 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 		 * BE に直した 2 バイト差分を積む。
 		 */
 		if (csum.offset && old_l4_csum_host != 0) {
-			new_l4_csum_host = csum_fold(csum_add((__wsum)~new_l4_csum_host, sum));
+			new_l4_csum_host = csum_fold(csum_add((__wsum)~new_l4_csum_host, sum2));
 
-			__be16 old_l4_csum_be_wire = bpf_htons(old_l4_csum_host);
-			__be16 new_l4_csum_be_wire = bpf_htons(new_l4_csum_host);
-			payload_diff = csum_diff(&old_l4_csum_be_wire, 2,
-						 &new_l4_csum_be_wire, 2, payload_diff);
+			from = (__u32)old_l4_csum_host;
+			to = (__u32)new_l4_csum_host;
+			payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 		}
 	}
 
@@ -649,21 +658,19 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 		return DROP_CSUM_L3;
 
 	/* payload_diff に “IPヘッダのチェックサム 2 バイト（BE）” の差分を積む */
-	new_ip_csum_host = csum_fold(csum_add((__wsum)~old_ip_csum_host, sum));
+	new_ip_csum_host = csum_fold(csum_add((__wsum)~old_ip_csum_host, sum2));
 	{
-		__be16 old_ip_csum_be_wire = bpf_htons(old_ip_csum_host);
-		__be16 new_ip_csum_be_wire = bpf_htons(new_ip_csum_host);
-		payload_diff = csum_diff(&old_ip_csum_be_wire, 2,
-					 &new_ip_csum_be_wire, 2, payload_diff);
+		from = (__u32)old_ip_csum_host;
+		to = (__u32)new_ip_csum_host;
+		payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 	}
 
-	/* outer_icmp_offが有効かつpayload_diffが非0なら、外側ICMP checksum修正 */
 	if (outer_icmp_off && payload_diff) {
 		struct csum_offset csum = {
 			.offset = offsetof(struct icmphdr, checksum),
 			.flags = 0,
 		};
-		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, payload_diff, 0) < 0)
+		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, bpf_htonl(payload_diff), 0) < 0)
 			return DROP_CSUM_L4;
 	}
 
