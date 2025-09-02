@@ -529,9 +529,7 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			__be16 old_port, __be16 new_port, __u16 port_off,
 			__u32 outer_icmp_off)
 {
-	__be32 addr_diff_be;
 	__u32 addr_diff_host;
-	int err;
 	__u32 from;
 	__u32 to;
 	__be16 old_ip_csum_be;
@@ -547,27 +545,13 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 		return 0;
 	}
 
-	/* アドレス変更の差分 */
-	addr_diff_be = csum_diff(&old_addr, 4, &new_addr, 4, 0);
-
 	/* アドレス変更の差分（on-wire の 32bit ワード差分としてOK） */
 	from = bpf_ntohl(old_addr);
 	to = bpf_ntohl(new_addr);
 	addr_diff_host = csum_diff(&from, 4, &to, 4, 0);
 	payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 
-	/* アドレス変更による L3 チェックサムの更新（実パケット側） */
-	/* このブロックは別関数 */
-	if (ipv4_csum_update_by_diff(ctx, l3_off, addr_diff_be) < 0)
-		return DROP_CSUM_L3;
-
-	/* アドレス書き換え（on-wire BE） */
-	/* このブロックは別関数 */
-	if (ctx_store_bytes(ctx, l3_off + addr_off, &new_addr, 4, 0) < 0)
-		return DROP_WRITE_ERROR;
-
 	if (has_l4_header) {
-		int flags = BPF_F_PSEUDO_HDR;
 		struct csum_offset csum = {};
 		bool do_port_rewrite = old_port != new_port;
 
@@ -604,12 +588,6 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			to = (__u32)bpf_ntohs(new_port);
 			payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 
-			/* ポート書き換え（実データと L4 チェックサムの更新） */
-			/* このブロックは別関数 */
-			err = l4_modify_port(ctx, l4_off, port_off, &csum, new_port, old_port);
-			if (err < 0)
-				return err;
-
 			/* new_l4_csum_host を “ポート変更のみ反映” で一旦計算（ホスト順序） */
 			if (old_l4_csum_host != 0) {
 				from = (__u32)bpf_ntohs(old_port);
@@ -637,26 +615,25 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 		}
 
-		/* アドレス変更による L4 チェックサムの更新（実パケット側） */
-		/* このブロックは別関数 */
-		if (csum.offset &&
-		    csum_l4_replace(ctx, l4_off, &csum, 0, addr_diff_be, flags) < 0)
-			return DROP_CSUM_L4;
 	}
 
 	/* L3ヘッダの元のチェックサム（BE で読み→ホストに直す） */
 	/* payload_diff に “IPヘッダのチェックサム 2 バイト（BE）” の差分を積む */
-	/* このブロックは実パケット書き換え前*/
 	old_ip_csum_be = 0;
 	if (ctx_load_bytes(ctx, l3_off + offsetof(struct iphdr, check),
 				&old_ip_csum_be, sizeof(old_ip_csum_be)) < 0)
 		return DROP_INVALID;
 	old_ip_csum_host = bpf_ntohs(old_ip_csum_be);
-	/* このブロックは実パケット書き換え前後ともOK */
 	new_ip_csum_host = csum_fold(csum_add((__wsum)~old_ip_csum_host, addr_diff_host));
 	from = (__u32)old_ip_csum_host;
 	to = (__u32)new_ip_csum_host;
 	payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
+
+	/* 実パケット書き換え */
+	snat_v4_rewrite_headers(ctx, nexthdr, l3_off,
+			has_l4_header, l4_off,
+			old_addr, new_addr, addr_off,
+			old_port, new_port, port_off);
 
 	/* outer ICMPヘッダのチェックサム更新 */
 	if (outer_icmp_off && payload_diff) {
