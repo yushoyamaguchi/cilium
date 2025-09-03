@@ -523,7 +523,7 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 }
 
 static __always_inline int
-snat_v4_calc_payload_diff(__u8 nexthdr, bool has_l4_csum,
+calc_ipv4_diff_for_csum(__u8 nexthdr, bool has_l4_csum,
 			__be32 old_addr, __be32 new_addr, __be16 old_ip_csum,
 			__be16 old_port, __be16 new_port, __be16 old_l4_csum,
 			__wsum *diff)
@@ -531,39 +531,40 @@ snat_v4_calc_payload_diff(__u8 nexthdr, bool has_l4_csum,
 	__u32 from;
 	__u32 to;
 	__u32 addr_diff_host;
-	__sum16 old_ip_csum_host = 0;
-	__sum16 new_ip_csum_host = 0;
-	__sum16 old_l4_csum_host = 0;
-	__sum16 new_l4_csum_host = 0;
+	__sum16 old_ip_csum_host;
+	__sum16 new_ip_csum_host;
+
 	/* Difference for changes to the ICMP payload */
-	__wsum payload_diff = 0;
+	__wsum payload_diff_host = 0;
 
 	/* No change needed: */
 	if (old_addr == new_addr && old_port == new_port) {
 		return 0;
 	}
 
-	/* Reflect the difference of address change in payload_diff */
+	/* Reflect the difference of address change in payload_diff_host */
 	from = bpf_ntohl(old_addr);
 	to = bpf_ntohl(new_addr);
 	addr_diff_host = csum_diff(&from, 4, &to, 4, 0);
-	payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
+	payload_diff_host = csum_diff(&from, 4, &to, 4, payload_diff_host);
 	
-	/* Reflect the difference of the inner IP header in payload_diff */
+	/* Reflect the difference of the inner IP header in payload_diff_host */
 	old_ip_csum_host = bpf_ntohs(old_ip_csum);
 	new_ip_csum_host = csum_fold(csum_add((__wsum)~old_ip_csum_host, addr_diff_host));
 	from = (__u32)old_ip_csum_host;
 	to = (__u32)new_ip_csum_host;
-	payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
+	payload_diff_host = csum_diff(&from, 4, &to, 4, payload_diff_host);
 
 	if (has_l4_csum) {
+		__sum16 old_l4_csum_host;
+		__sum16 new_l4_csum_host;
 		bool do_port_rewrite = old_port != new_port;
 
 		/* Obtain the old L4 checksum and convert to host byte order */
 		old_l4_csum_host = bpf_ntohs(old_l4_csum);
 
 		if (do_port_rewrite) {
-			/* ICMP and SCTP cannot reach here */
+			/* Only TCP and UDP reach here */
 			switch (nexthdr) {
 			case IPPROTO_TCP:
 			case IPPROTO_UDP:
@@ -572,10 +573,10 @@ snat_v4_calc_payload_diff(__u8 nexthdr, bool has_l4_csum,
 				return DROP_UNKNOWN_L4;
 			}
 
-			/* Reflect the difference of port value to payload_diff */
+			/* Reflect the difference of port value to payload_diff_host */
 			from = (__u32)bpf_ntohs(old_port);
 			to = (__u32)bpf_ntohs(new_port);
-			payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
+			payload_diff_host = csum_diff(&from, 4, &to, 4, payload_diff_host);
 
 			/* Calculate new_l4_csum_host reflecting only the port change (host order) */
 			if (old_l4_csum_host != 0) {
@@ -592,20 +593,18 @@ snat_v4_calc_payload_diff(__u8 nexthdr, bool has_l4_csum,
 			new_l4_csum_host = old_l4_csum_host;
 		}
 
-		/* Reflect the difference of the L4 checksum in payload_diff.
-		 * Here, new_l4_csum_host already reflects the port change,
-		 * so we further add the address change diff (in host order) to get the final value,
-		 * then add the 2-byte difference (in BE) to payload_diff.
+		/* Reflect the difference of the L4 checksum to payload_diff_host.
+		 * We should consider the difference of addr for also L4 checksum.
 		 */
 		if (has_l4_csum && old_l4_csum_host != 0) {
 			new_l4_csum_host = csum_fold(csum_add((__wsum)~new_l4_csum_host, addr_diff_host));
 			from = (__u32)old_l4_csum_host;
 			to = (__u32)new_l4_csum_host;
-			payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
+			payload_diff_host = csum_diff(&from, 4, &to, 4, payload_diff_host);
 		}
-
 	}
-	*diff = payload_diff;
+
+	*diff = bpf_htonl(payload_diff_host);
 	return 0;
 }
 
@@ -620,7 +619,7 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 	bool has_l4_csum = false;
 	__be16 old_ip_csum_be = 0;
 	__be16 old_l4_csum_be = 0;
-	__wsum payload_diff;
+	__wsum diff_for_csum = 0;
 
 	/* Get old csum value of inner packet */
 	if (ctx_load_bytes(ctx, l3_off + offsetof(struct iphdr, check),
@@ -643,9 +642,9 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 	}
 
 	/* Calculate diff value for checksum */
-	ret = snat_v4_calc_payload_diff(nexthdr, has_l4_csum,
+	ret = calc_ipv4_diff_for_csum(nexthdr, has_l4_csum,
 			old_addr, new_addr, old_ip_csum_be,
-			old_port, new_port, old_l4_csum_be, &payload_diff);
+			old_port, new_port, old_l4_csum_be, &diff_for_csum);
 	if (IS_ERR(ret))
 		return ret;
 
@@ -656,12 +655,12 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			old_port, new_port, port_off);
 
 	/* Update the checksum of the outer ICMP header */
-	if (outer_icmp_off && payload_diff) {
+	if (outer_icmp_off && diff_for_csum) {
 		struct csum_offset csum = {
 			.offset = offsetof(struct icmphdr, checksum),
 			.flags = 0,
 		};
-		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, bpf_htonl(payload_diff), 0) < 0)
+		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, diff_for_csum, 0) < 0)
 			return DROP_CSUM_L4;
 	}
 
