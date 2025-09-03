@@ -529,16 +529,14 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			__be16 old_port, __be16 new_port, __u16 port_off,
 			__u32 outer_icmp_off)
 {
-	__u32 addr_diff_host;
 	__u32 from;
 	__u32 to;
-	__be16 old_ip_csum_be;
+	__u32 addr_diff_host;
+	__be16 old_ip_csum_be=0;
+	__sum16 old_ip_csum_host = 0;
+	__sum16 new_ip_csum_host = 0;
 
 	__wsum payload_diff = 0; /* ICMP payloadへの変更分の差分 */
-
-	/* 注意：*_host はホスト順序、*_be はワイヤ(BE)順序 */
-	__sum16 old_ip_csum_host = 0, new_ip_csum_host = 0;
-	__sum16 old_l4_csum_host = 0, new_l4_csum_host = 0;
 
 	/* No change needed: */
 	if (old_addr == new_addr && old_port == new_port) {
@@ -550,14 +548,27 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 	to = bpf_ntohl(new_addr);
 	addr_diff_host = csum_diff(&from, 4, &to, 4, 0);
 	payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
+	
+	/* L3ヘッダの元のチェックサム（BE で読み→ホストに直す） */
+	/* payload_diff に “IPヘッダのチェックサム 2 バイト（BE）” の差分を積む */
+	if (ctx_load_bytes(ctx, l3_off + offsetof(struct iphdr, check),
+				&old_ip_csum_be, sizeof(old_ip_csum_be)) < 0)
+		return DROP_INVALID;
+	old_ip_csum_host = bpf_ntohs(old_ip_csum_be);
+	new_ip_csum_host = csum_fold(csum_add((__wsum)~old_ip_csum_host, addr_diff_host));
+	from = (__u32)old_ip_csum_host;
+	to = (__u32)new_ip_csum_host;
+	payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 
 	if (has_l4_header) {
 		struct csum_offset csum = {};
+		__sum16 old_l4_csum_host = 0;
+		__sum16 new_l4_csum_host = 0;
 		bool do_port_rewrite = old_port != new_port;
 
 		csum_l4_offset_and_flags(nexthdr, &csum);
 
-		/* L4の旧チェックサム（あるなら）を取得（BE→ホスト） */
+		/* L4の旧チェックサムを取得（BE→ホスト） */
 		if (csum.offset) {
 			__be16 old_l4_csum_be = 0;
 			if (ctx_load_bytes(ctx, l4_off + csum.offset,
@@ -609,25 +620,12 @@ snat_v4_rewrite_inner_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 		 */
 		if (csum.offset && old_l4_csum_host != 0) {
 			new_l4_csum_host = csum_fold(csum_add((__wsum)~new_l4_csum_host, addr_diff_host));
-
 			from = (__u32)old_l4_csum_host;
 			to = (__u32)new_l4_csum_host;
 			payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 		}
 
 	}
-
-	/* L3ヘッダの元のチェックサム（BE で読み→ホストに直す） */
-	/* payload_diff に “IPヘッダのチェックサム 2 バイト（BE）” の差分を積む */
-	old_ip_csum_be = 0;
-	if (ctx_load_bytes(ctx, l3_off + offsetof(struct iphdr, check),
-				&old_ip_csum_be, sizeof(old_ip_csum_be)) < 0)
-		return DROP_INVALID;
-	old_ip_csum_host = bpf_ntohs(old_ip_csum_be);
-	new_ip_csum_host = csum_fold(csum_add((__wsum)~old_ip_csum_host, addr_diff_host));
-	from = (__u32)old_ip_csum_host;
-	to = (__u32)new_ip_csum_host;
-	payload_diff = csum_diff(&from, 4, &to, 4, payload_diff);
 
 	/* 実パケット書き換え */
 	snat_v4_rewrite_headers(ctx, nexthdr, l3_off,
