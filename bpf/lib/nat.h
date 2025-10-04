@@ -525,21 +525,6 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 
 
 static __always_inline int
-calc_ipv4_diff_for_csum(__be32 old_addr, __be32 new_addr, __wsum *diff)
-{
-	/* No change needed: */
-	if (old_addr == new_addr)
-		return 0;
-
-	/* Reflect the change in the inner L4 checksum caused by the pseudo-address update 
-	 * into payload_diff_host.
-	 * All the other changes in inner packet cancel each other out.
-	 */
-	*diff = csum_diff(&new_addr, 4, &old_addr, 4, 0);
-	return 0;
-}
-
-static __always_inline int
 snat_v4_rewrite_icmp_error_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			bool has_l4_header, int l4_off,
 			__be32 old_addr, __be32 new_addr, __u16 addr_off,
@@ -550,6 +535,11 @@ snat_v4_rewrite_icmp_error_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_
 	__be16 old_ip_csum_be = 0;
 	__be16 old_l4_csum_be = 0;
 	__wsum diff_for_csum = 0;
+	__wsum diff_for_csum2 = 0;
+	__wsum diff_for_csum_host = 0;
+	__wsum diff_for_csum_host2 = 0;
+	__u32 old_addr_host = bpf_ntohl(old_addr);
+	__u32 new_addr_host = bpf_ntohl(new_addr);
 
 	if (icmp_has_full_l4_header) {
 		/* Get old csum value of inner packet */
@@ -571,10 +561,22 @@ snat_v4_rewrite_icmp_error_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_
 			}
 		}
 
-		/* Calculate diff value for checksum */
-		ret = calc_ipv4_diff_for_csum(old_addr, new_addr, &diff_for_csum);
-		if (IS_ERR(ret))
-			return ret;
+		/* Calculate diff value for checksum.
+		 * Reflect the change in the inner L4 checksum caused by the pseudo-address update
+		 * into payload_diff_host.
+		 * All the other changes in inner packet cancel each other out.
+		 */
+		if (old_addr != new_addr) {
+			diff_for_csum = csum_diff(&new_addr, 4, &old_addr, 4, 0);
+			diff_for_csum2 = csum_diff(&old_addr, 4, &new_addr, 4, 0);
+			diff_for_csum_host = csum_diff(&new_addr_host, 4, &old_addr_host, 4, 0);
+			diff_for_csum_host2 = csum_diff(&old_addr_host, 4, &new_addr_host, 4, 0);
+		}
+		cilium_dbg(ctx, 169, old_addr, new_addr);
+		cilium_dbg3(ctx, 169, 1, diff_for_csum, diff_for_csum2);
+		cilium_dbg3(ctx, 169, 11, csum_fold(diff_for_csum), csum_fold(diff_for_csum2));
+		cilium_dbg3(ctx, 169, 2, diff_for_csum_host, diff_for_csum_host2);
+		cilium_dbg3(ctx, 169, 12, csum_fold(diff_for_csum_host), csum_fold(diff_for_csum_host2));
 	}
 
 	/* Rewrite the actual packet */
