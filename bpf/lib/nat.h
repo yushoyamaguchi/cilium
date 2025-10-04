@@ -523,6 +523,81 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 	return 0;
 }
 
+
+static __always_inline int
+calc_ipv4_diff_for_csum(__be32 old_addr, __be32 new_addr, __wsum *diff)
+{
+	/* No change needed: */
+	if (old_addr == new_addr)
+		return 0;
+
+	/* Reflect the change in the inner L4 checksum caused by the pseudo-address update 
+	 * into payload_diff_host.
+	 * All the other changes in inner packet cancel each other out.
+	 */
+	*diff = csum_diff(&new_addr, 4, &old_addr, 4, 0);
+	return 0;
+}
+
+static __always_inline int
+snat_v4_rewrite_icmp_error_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
+			bool has_l4_header, int l4_off,
+			__be32 old_addr, __be32 new_addr, __u16 addr_off,
+			__be16 old_port, __be16 new_port, __u16 port_off,
+			__u32 outer_icmp_off, bool icmp_has_full_l4_header)
+{
+	int ret;
+	__be16 old_ip_csum_be = 0;
+	__be16 old_l4_csum_be = 0;
+	__wsum diff_for_csum = 0;
+
+	if (icmp_has_full_l4_header) {
+		/* Get old csum value of inner packet */
+		if (ctx_load_bytes(ctx, l3_off + offsetof(struct iphdr, check),
+					&old_ip_csum_be, sizeof(old_ip_csum_be)) < 0)
+			return DROP_INVALID;
+		if (has_l4_header) {
+			struct csum_offset csum = {};
+	#ifdef ENABLE_SCTP
+			if (nexthdr == IPPROTO_SCTP)
+				return DROP_CSUM_L4;
+	#endif  /* ENABLE_SCTP */
+			csum_l4_offset_and_flags(nexthdr, &csum);
+			/* Only TCP and UDP have csum */
+			if (csum.offset) {
+				if (ctx_load_bytes(ctx, l4_off + csum.offset,
+							&old_l4_csum_be, sizeof(old_l4_csum_be)) < 0)
+					return DROP_INVALID;
+			}
+		}
+
+		/* Calculate diff value for checksum */
+		ret = calc_ipv4_diff_for_csum(old_addr, new_addr, &diff_for_csum);
+		if (IS_ERR(ret))
+			return ret;
+	}
+
+	/* Rewrite the actual packet */
+	ret = snat_v4_rewrite_headers(ctx, nexthdr, l3_off,
+			has_l4_header, l4_off,
+			old_addr, new_addr, addr_off,
+			old_port, new_port, port_off);
+	if (IS_ERR(ret))
+		return ret;
+
+	/* Update the checksum of the outer ICMP header */
+	if (outer_icmp_off && diff_for_csum) {
+		struct csum_offset csum = {
+			.offset = offsetof(struct icmphdr, checksum),
+			.flags = 0,
+		};
+		if (csum_l4_replace(ctx, outer_icmp_off, &csum, 0, diff_for_csum, 0) < 0)
+			return DROP_CSUM_L4;
+	}
+
+	return 0;
+}
+
 static __always_inline bool
 snat_v4_nat_can_skip(const struct ipv4_nat_target *target,
 		     const struct ipv4_ct_tuple *tuple)
@@ -1011,6 +1086,7 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	int ret;
 	__u32 icmp_xlen_off = (__u32) inner_l3_off - sizeof(struct icmphdr) +
 	  offsetof(struct icmphdr, un.frag.__unused) + 1;
+	__u32 outer_icmp_off = (int)inner_l3_off - (int)sizeof(struct icmphdr);
 
 	/* According to the RFC 5508, any networking equipment that is
 	 * responding with an ICMP Error packet should embed the original
@@ -1081,9 +1157,10 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	icmp_has_full_l4_header = icmp_xlen >= ((tuple.nexthdr == IPPROTO_TCP) ? 3 : 0);
 
 	/* The embedded packet was SNATed on egress. Reverse it again: */
-	ret = snat_v4_rewrite_headers(ctx, tuple.nexthdr, (int)inner_l3_off, true, icmpoff,
+	ret = snat_v4_rewrite_icmp_error_headers(ctx, tuple.nexthdr, (int)inner_l3_off, true, icmpoff,
 				      tuple.daddr, (*state)->to_daddr, IPV4_SADDR_OFF,
-				      tuple.dport, (*state)->to_dport, port_off);
+				      tuple.dport, (*state)->to_dport, port_off,
+					  outer_icmp_off, icmp_has_full_l4_header);
 	/* Failing to update the inner L4 checksum is not fatal if the header
 	 * is incomplete.
 	 */
