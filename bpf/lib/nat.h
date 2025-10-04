@@ -526,11 +526,6 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 static __always_inline int
 calc_ipv4_diff_for_csum(__be32 old_addr, __be32 new_addr, __wsum *diff)
 {
-	__u32 old_addr_be = bpf_ntohl(old_addr);
-	__u32 new_addr_be = bpf_ntohl(new_addr);
-	/* Difference for changes to the ICMP payload */
-	__wsum payload_diff_host = 0;
-
 	/* No change needed: */
 	if (old_addr == new_addr)
 		return 0;
@@ -539,9 +534,7 @@ calc_ipv4_diff_for_csum(__be32 old_addr, __be32 new_addr, __wsum *diff)
 	 * into payload_diff_host.
 	 * All the other changes in inner packet cancel each other out.
 	 */
-	payload_diff_host = csum_fold(csum_diff(&old_addr_be, 4, &new_addr_be, 4, payload_diff_host));
-
-	*diff = bpf_htonl(payload_diff_host);
+	*diff = csum_diff(&new_addr, 4, &old_addr, 4, 0);
 	return 0;
 }
 
