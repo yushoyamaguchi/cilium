@@ -515,6 +515,11 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			if (err < 0)
 				return err;
 
+			/* Apply additional L4 checksum diff if provided (for ICMP error messages). */
+			if (l4_csum_diff && csum.offset &&
+				csum_l4_replace(ctx, l4_off, &csum, 0, l4_csum_diff, 0) < 0)
+				return DROP_CSUM_L4;
+
 			/* Restore the original offset. */
 			if (nexthdr == IPPROTO_ICMP)
 				csum.offset = 0;
@@ -523,11 +528,6 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 		/* Amend the L4 checksum due to changing the addresses. */
 		if (csum.offset &&
 		    csum_l4_replace(ctx, l4_off, &csum, 0, sum, flags) < 0)
-			return DROP_CSUM_L4;
-
-		/* Apply additional L4 checksum diff if provided (for ICMP error messages). */
-		if (l4_csum_diff && csum.offset &&
-		    csum_l4_replace(ctx, l4_off, &csum, 0, l4_csum_diff, 0) < 0)
 			return DROP_CSUM_L4;
 	}
 
@@ -892,8 +892,7 @@ snat_v4_nat_handle_icmp_error(struct __ctx_buff *ctx, __u64 off,
 	 */
 	ret = snat_v4_rewrite_headers(ctx, tuple.nexthdr, inner_l3_off, true, icmpoff,
 				      tuple.saddr, (*state)->to_saddr, IPV4_DADDR_OFF,
-				      tuple.sport, (*state)->to_sport, port_off,
-				      0);
+				      tuple.sport, (*state)->to_sport, port_off, 0);
 	/* Failing to update the inner L4 checksum is not fatal if the header
 	 * is incomplete.
 	 */
@@ -928,8 +927,7 @@ __snat_v4_nat(struct __ctx_buff *ctx, struct ipv4_ct_tuple *tuple,
 	ret = snat_v4_rewrite_headers(ctx, tuple->nexthdr, ETH_HLEN,
 				      ipfrag_has_l4_header(fraginfo), l4_off,
 				      tuple->saddr, state->to_saddr, IPV4_SADDR_OFF,
-				      tuple->sport, to_sport, port_off,
-				      0);
+				      tuple->sport, to_sport, port_off, 0);
 
 	if (update_tuple) {
 		tuple->saddr = state->to_saddr;
@@ -1136,8 +1134,7 @@ snat_v4_rev_nat_handle_icmp_error(struct __ctx_buff *ctx,
 	ret = snat_v4_rewrite_headers(ctx, tuple.nexthdr, (int)inner_l3_off,
 				      true, icmpoff,
 				      tuple.daddr, (*state)->to_daddr, IPV4_SADDR_OFF,
-				      tuple.dport, (*state)->to_dport, port_off,
-				      0);
+				      tuple.dport, (*state)->to_dport, port_off, 0);
 	/* Failing to update the inner L4 checksum is not fatal if the header
 	 * is incomplete.
 	 */
