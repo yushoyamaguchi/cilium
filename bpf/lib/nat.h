@@ -466,13 +466,13 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			bool has_l4_header, int l4_off,
 			__be32 old_addr, __be32 new_addr, __u16 addr_off,
 			__be16 old_port, __be16 new_port, __u16 port_off,
-			__wsum l4_csum_diff)
+			__wsum l4_csum_diff_from_inner)
 {
 	__wsum sum;
 	int err;
 
 	/* No change needed: */
-	if (old_addr == new_addr && old_port == new_port && !l4_csum_diff)
+	if (old_addr == new_addr && old_port == new_port && !l4_csum_diff_from_inner)
 		return 0;
 
 	sum = csum_diff(&old_addr, 4, &new_addr, 4, 0);
@@ -515,11 +515,6 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 			if (err < 0)
 				return err;
 
-			/* Apply additional L4 checksum diff if provided (for ICMP error messages). */
-			if (l4_csum_diff && csum.offset &&
-				csum_l4_replace(ctx, l4_off, &csum, 0, l4_csum_diff, 0) < 0)
-				return DROP_CSUM_L4;
-
 			/* Restore the original offset. */
 			if (nexthdr == IPPROTO_ICMP)
 				csum.offset = 0;
@@ -529,6 +524,13 @@ snat_v4_rewrite_headers(struct __ctx_buff *ctx, __u8 nexthdr, int l3_off,
 		if (csum.offset &&
 		    csum_l4_replace(ctx, l4_off, &csum, 0, sum, flags) < 0)
 			return DROP_CSUM_L4;
+
+		/* Apply additional L4 checksum diff if provided (for ICMP error messages). */
+		if (l4_csum_diff_from_inner && !csum.offset) {
+			csum.offset = offsetof(struct icmphdr, checksum);
+			if (csum_l4_replace(ctx, l4_off, &csum, 0, l4_csum_diff_from_inner, 0) < 0)
+				return DROP_CSUM_L4;
+		}
 	}
 
 	return 0;
