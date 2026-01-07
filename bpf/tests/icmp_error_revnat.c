@@ -21,24 +21,24 @@
 #include "scapy.h"
 
 /* IP addresses mapping to Scapy definitions (in host byte order):
- * v4_node_one   = "10.0.10.1"  -> IP_HOST (the node being tested)
- * v4_node_two   = "10.0.10.2"  -> IP_ROUTER (router sending ICMP error)
- * v4_ext_one    = "110.0.11.1" -> IP_ENDPOINT (external endpoint)
+ * v4_node_one   = "10.0.10.1"  -> IP_ENDPOINT (node/endpoint)
+ * v4_pod_one    = "192.168.0.1" -> IP_HOST (pod being SNATed)
+ * v4_pod_two    = "192.168.0.2" -> IP_ROUTER (pod sending ICMP error)
  */
-#define IP_ENDPOINT ((110 << 24) | (0 << 16) | (11 << 8) | 1)  /* 110.0.11.1 */
-#define IP_HOST     ((10 << 24) | (0 << 16) | (10 << 8) | 1)   /* 10.0.10.1 */
-#define IP_ROUTER   ((10 << 24) | (0 << 16) | (10 << 8) | 2)   /* 10.0.10.2 */
+#define IP_ENDPOINT ((10 << 24) | (0 << 16) | (10 << 8) | 1)    /* 10.0.10.1 */
+#define IP_HOST     ((192 << 24) | (168 << 16) | (0 << 8) | 1)  /* 192.168.0.1 */
+#define IP_ROUTER   ((192 << 24) | (168 << 16) | (0 << 8) | 2)  /* 192.168.0.2 */
 #define IP_WORLD    IP_ROUTER  /* same as router for this test */
 
 /* Test snat_v4_rev_nat() with ICMP error containing embedded TCP packet
  *
  * Flow:
- * 1. Simulate an outgoing connection: endpoint (110.0.11.1:3030) -> world (10.0.10.2:80)
- *    This gets SNATed to: host (10.0.10.1:NODEPORT_PORT_MIN_NAT) -> world (10.0.10.2:80)
- * 2. Router sends back ICMP Frag Needed error about the SNATed packet
+ * 1. Simulate an outgoing connection: endpoint (10.0.10.1:3030) -> pod (192.168.0.2:80)
+ *    This gets SNATed to: pod (192.168.0.1:NODEPORT_PORT_MIN_NAT) -> pod (192.168.0.2:80)
+ * 2. Pod sends back ICMP Frag Needed error about the SNATed packet
  * 3. snat_v4_rev_nat() should reverse the NAT in both outer and inner (embedded) packets
- * 4. Result: ICMP error should be addressed to endpoint (110.0.11.1)
- *            with embedded packet showing original src (110.0.11.1:3030)
+ * 4. Result: ICMP error should be addressed to endpoint (10.0.10.1)
+ *            with embedded packet showing original src (10.0.10.1:3030)
  */
 PKTGEN("tc", "nat4_icmp_error_tcp_snat_revnat")
 int nat4_icmp_error_tcp_snat_revnat_pktgen(struct __ctx_buff *ctx)
@@ -58,20 +58,20 @@ SETUP("tc", "nat4_icmp_error_tcp_snat_revnat")
 int nat4_icmp_error_tcp_snat_revnat_setup(struct __ctx_buff *ctx)
 {
 	/* Set up NAT mapping to simulate prior outgoing connection.
-	 * Original tuple: endpoint -> world
+	 * Original tuple: endpoint -> pod
 	 */
 	struct ipv4_ct_tuple tuple = {
 		.nexthdr = IPPROTO_TCP,
-		.saddr = bpf_htonl(IP_ENDPOINT),  /* 110.0.11.1 */
-		.daddr = bpf_htonl(IP_WORLD),      /* 10.0.10.2 */
+		.saddr = bpf_htonl(IP_ENDPOINT),  /* 10.0.10.1 */
+		.daddr = bpf_htonl(IP_WORLD),      /* 192.168.0.2 */
 		.sport = bpf_htons(3030),
 		.dport = bpf_htons(80),
 		.flags = 0,
 	};
 
-	/* NAT target: translate to host IP */
+	/* NAT target: translate to pod IP */
 	struct ipv4_nat_target target = {
-		.addr = bpf_htonl(IP_HOST),  /* 10.0.10.1 */
+		.addr = bpf_htonl(IP_HOST),  /* 192.168.0.1 */
 		.min_port = NODEPORT_PORT_MIN_NAT,
 		.max_port = NODEPORT_PORT_MIN_NAT,
 	};
@@ -94,8 +94,8 @@ int nat4_icmp_error_tcp_snat_revnat_setup(struct __ctx_buff *ctx)
 
 	/* Now call snat_v4_rev_nat() - this is the function under test.
 	 * It should:
-	 * 1. Reverse NAT the outer IP dst: host -> endpoint
-	 * 2. Reverse NAT the embedded IP src: host -> endpoint
+	 * 1. Reverse NAT the outer IP dst: pod -> endpoint
+	 * 2. Reverse NAT the embedded IP src: pod -> endpoint
 	 * 3. Restore the embedded TCP sport: NODEPORT_PORT_MIN_NAT -> 3030
 	 */
 	ret = snat_v4_rev_nat(ctx, &target, &trace, NULL);
