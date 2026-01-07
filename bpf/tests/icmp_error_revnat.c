@@ -47,8 +47,8 @@ int nat4_icmp_error_tcp_snat_revnat_pktgen(struct __ctx_buff *ctx)
 	pktgen__init(&builder, ctx);
 
 	/* Use Scapy-generated ICMP error packet */
-	BUF_DECL(ICMP4_FRAG_NEEDED, icmp4_frag_needed);
-	BUILDER_PUSH_BUF(builder, ICMP4_FRAG_NEEDED);
+	BUF_DECL(ICMP4_ERR_FRAG_NEEDED_FOR_REVNAT, icmp4_err_frag_needed_for_revnat);
+	BUILDER_PUSH_BUF(builder, ICMP4_ERR_FRAG_NEEDED_FOR_REVNAT);
 
 	pktgen__finish(&builder);
 	return 0;
@@ -130,9 +130,9 @@ int nat4_icmp_error_tcp_snat_revnat_check(const struct __ctx_buff *ctx)
 	/* Compare the packet with expected output after rev-NAT.
 	 * Note: offset sizeof(__u32) to skip the return code prepended by framework.
 	 */
-	BUF_DECL(EXPECTED_PKT, icmp4_frag_needed_after_revnat);
+	BUF_DECL(ICMP4_ERR_FRAG_NEEDED_AFTER_REVNAT, icmp4_err_frag_needed_after_revnat);
 	ASSERT_CTX_BUF_OFF("icmp4_revnat_ok", "Ether", ctx, sizeof(__u32),
-			   EXPECTED_PKT, sizeof(BUF(EXPECTED_PKT)));
+			   ICMP4_ERR_FRAG_NEEDED_AFTER_REVNAT, sizeof(BUF(ICMP4_ERR_FRAG_NEEDED_AFTER_REVNAT)));
 
 	test_finish();
 }

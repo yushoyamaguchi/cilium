@@ -5,7 +5,7 @@ from scapy.all import *
 
 from pkt_defs_common import *
 
-icmp4_frag_needed = (
+icmp4_err_frag_needed_for_revnat = (
     Ether(
         src=mac_one,
         dst=mac_two,
@@ -38,7 +38,7 @@ icmp4_frag_needed = (
 )
 
 
-icmp4_frag_needed_after_revnat = (
+icmp4_err_frag_needed_after_revnat = (
     Ether(src=mac_one, dst=mac_two) /
     IP(
         src=v4_node_two,      # router
