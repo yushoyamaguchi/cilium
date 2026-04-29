@@ -909,6 +909,29 @@ lb6_extract_tuple(struct __ctx_buff *ctx, struct ipv6hdr *ip6, fraginfo_t fragin
 	}
 }
 
+/**
+ * Extract CT tuple from the embedded original packet inside an ICMPv6 error.
+ *
+ * Fills @tuple with the reverse-direction representation of the original packet
+ * (saddr/daddr swapped, ports swapped) so callers can use it directly for a
+ * SCOPE_REVERSE CT lookup.
+ *
+ * Returns:
+ *   - CTX_ACT_OK on success
+ *   - DROP_UNSUPP_SERVICE_PROTO if not an ICMPv6 error or inner proto unsupported
+ *   - Negative error code on parse failure
+ */
+static __always_inline int
+lb6_extract_icmpv6_error_tuple(struct __ctx_buff *ctx __maybe_unused,
+			       const struct ipv6hdr *ip6 __maybe_unused,
+			       int l4_off __maybe_unused,
+			       struct ipv6_ct_tuple *tuple __maybe_unused,
+			       int *inner_l4_off __maybe_unused)
+{
+	/* TODO: implement */
+	return DROP_UNSUPP_SERVICE_PROTO;
+}
+
 static __always_inline
 bool lb6_src_range_ok(const struct lb6_service *svc __maybe_unused,
 		      const union v6addr *saddr __maybe_unused)
@@ -1677,6 +1700,29 @@ lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo
 	default:
 		return DROP_UNKNOWN_L4;
 	}
+}
+
+/**
+ * Extract CT tuple from the embedded original packet inside an ICMPv4 error.
+ *
+ * Fills @tuple with the reverse-direction representation of the original packet
+ * (saddr/daddr swapped, ports swapped) so callers can use it directly for a
+ * SCOPE_REVERSE CT lookup.
+ *
+ * Returns:
+ *   - CTX_ACT_OK on success
+ *   - DROP_UNSUPP_SERVICE_PROTO if not an ICMP error or inner proto unsupported
+ *   - Negative error code on parse failure
+ */
+static __always_inline int
+lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx __maybe_unused,
+			      const struct iphdr *ip4 __maybe_unused,
+			      int l4_off __maybe_unused,
+			      struct ipv4_ct_tuple *tuple __maybe_unused,
+			      int *inner_l4_off __maybe_unused)
+{
+	/* TODO: implement */
+	return DROP_UNSUPP_SERVICE_PROTO;
 }
 
 static __always_inline

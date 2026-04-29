@@ -178,6 +178,15 @@ nodeport_rev_dnat_fwd_ipv6(struct __ctx_buff *ctx, bool *snat_done,
 
 	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
+		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
+			int inner_l4_off;
+
+			ret = lb6_extract_icmpv6_error_tuple(ctx, ip6, l4_off,
+							     &tuple, &inner_l4_off);
+			if (ret == CTX_ACT_OK) {
+				/* TODO: CT lookup + RevDNAT inner header rewrite */
+			}
+		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			return CTX_ACT_OK;
 		return ret;
@@ -473,6 +482,15 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
+		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
+			int inner_l4_off;
+
+			ret = lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
+							    &tuple, &inner_l4_off);
+			if (ret == CTX_ACT_OK) {
+				/* TODO: CT lookup + RevDNAT inner header rewrite */
+			}
+		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			return CTX_ACT_OK;
 		return ret;
