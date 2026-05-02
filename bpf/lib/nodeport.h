@@ -942,7 +942,7 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 			.ifindex	= ctx_get_ifindex(ctx),
 		},
 	};
-	int ret, l4_off;
+	int ret, l4_off, inner_l4_off;
 	const struct remote_endpoint_info *info __maybe_unused;
 	struct ipv6_ct_tuple tuple __align_stack_8 = {};
 	struct ct_state ct_state = {};
@@ -954,6 +954,7 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 	fraginfo_t fraginfo;
 	int ifindex = 0;
 	__u32 monitor = 0;
+	bool is_icmp_error = false;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
@@ -973,13 +974,10 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
-			int inner_l4_off;
-
 			ret = lb6_extract_icmpv6_error_tuple(ctx, ip6, l4_off,
 							     &tuple, &inner_l4_off);
-			if (ret == CTX_ACT_OK) {
-				/* TODO: CT lookup + RevDNAT inner header rewrite */
-			}
+			if (ret == CTX_ACT_OK)
+				is_icmp_error = true;
 		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			goto out;
@@ -987,19 +985,25 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 	}
 
 	ret = ct_lazy_lookup6(get_ct_map6(&tuple), &tuple, ctx, fraginfo,
-			      l4_off, CT_INGRESS, SCOPE_REVERSE,
+			      is_icmp_error ? inner_l4_off : l4_off,
+			      CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
-		ret = ipv6_l3(ctx, ETH_HLEN, NULL, NULL, METRIC_EGRESS);
-		if (unlikely(ret != CTX_ACT_OK))
-			return ret;
+		if (!is_icmp_error) {
+			ret = ipv6_l3(ctx, ETH_HLEN, NULL, NULL, METRIC_EGRESS);
+			if (unlikely(ret != CTX_ACT_OK))
+				return ret;
 
-		ret = lb6_rev_nat(ctx, l4_off,
-				  ct_state.rev_nat_index, NULL, 0,
-				  false, &tuple, ipfrag_has_l4_header(fraginfo),
-				  dir);
+			ret = lb6_rev_nat(ctx, l4_off,
+					  ct_state.rev_nat_index, NULL, 0,
+					  false, &tuple, ipfrag_has_l4_header(fraginfo),
+					  dir);
+		} else {
+			//yama_todo: fix parameters passed to lb6_rev_nat_icmp6_error()
+			//ret = lb6_rev_nat_icmp6_error(...)
+		}
 		if (IS_ERR(ret))
 			return ret;
 		if (!revalidate_data(ctx, &data, &data_end, &ip6))
