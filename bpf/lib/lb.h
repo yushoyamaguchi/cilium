@@ -1721,8 +1721,22 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx __maybe_unused,
 			      struct ipv4_ct_tuple *tuple __maybe_unused,
 			      int *inner_l4_off __maybe_unused)
 {
-	/* TODO: implement */
+	/* yama_todo: implement */
 	return DROP_UNSUPP_SERVICE_PROTO;
+}
+
+// yama_todo: fix parameters and implement
+static __always_inline int                                                                                                                                 
+lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
+			      int outer_l3_off, int inner_l3_off,
+			      int inner_l4_off, __u8 inner_proto,
+			      const struct lb4_reverse_nat *nat,
+			      bool has_inner_l4_header)
+{
+	/* inner IP daddr: backend → nat->address */
+	/* inner L4 dport: backend port → nat->port */
+	/* outer ICMP checksum update */
+	return 0;
 }
 
 static __always_inline
