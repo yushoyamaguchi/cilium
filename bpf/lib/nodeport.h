@@ -2259,7 +2259,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		},
 	};
 	const struct remote_endpoint_info *info __maybe_unused = NULL;
-	int ifindex = 0, ret, l3_off = ETH_HLEN, l4_off;
+	int ifindex = 0, ret, l3_off = ETH_HLEN, l4_off, inner_l4_off;
 	struct ipv4_ct_tuple tuple = {};
 	struct ct_state ct_state = {};
 	void *data, *data_end;
@@ -2271,6 +2271,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	fraginfo_t fraginfo;
 	const __u32 *vrf_id __maybe_unused = NULL;
 	__u32 monitor = 0;
+	bool is_icmp_error = false;                                                                                                                                
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -2282,12 +2283,10 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
-			int inner_l4_off;
-
 			ret = lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
 							    &tuple, &inner_l4_off);
 			if (ret == CTX_ACT_OK) {
-				/* TODO: CT lookup + RevDNAT inner header rewrite */
+				is_icmp_error = true;
 			}
 		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
@@ -2315,14 +2314,20 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		goto redirect;
 
 	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
-			      l4_off, CT_INGRESS, SCOPE_REVERSE,
+			      is_icmp_error ? inner_l4_off : l4_off,
+				  CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
-		ret = lb4_rev_nat(ctx, l3_off, l4_off,
-				  ct_state.rev_nat_index, 0, 0,
-				  false, &tuple, ipfrag_has_l4_header(fraginfo));
+		if (!is_icmp_error) {
+			ret = lb4_rev_nat(ctx, l3_off, l4_off,
+					ct_state.rev_nat_index, 0, 0,
+					false, &tuple, ipfrag_has_l4_header(fraginfo));
+		} else {
+			// yama_todo: fix parameters passed to lb4_rev_nat_icmp4_error()
+			//lb4_rev_nat_icmp4_error()
+		}
 		if (IS_ERR(ret))
 			return ret;
 		if (!revalidate_data(ctx, &data, &data_end, &ip4))

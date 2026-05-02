@@ -464,7 +464,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 			   struct trace_ctx *trace, __s8 *ext_err __maybe_unused)
 {
 	struct bpf_fib_lookup_padded fib_params __maybe_unused = {};
-	int ret, l3_off = ETH_HLEN, l4_off;
+	int ret, l3_off = ETH_HLEN, l4_off, inner_l4_off;
 	struct lb4_reverse_nat nat_info;
 	struct ipv4_ct_tuple tuple = {};
 	struct ct_state ct_state = {};
@@ -472,6 +472,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	struct iphdr *ip4;
 	fraginfo_t fraginfo;
 	__u32 monitor = 0;
+	bool is_icmp_error = false;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -483,12 +484,10 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
-			int inner_l4_off;
-
 			ret = lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
 							    &tuple, &inner_l4_off);
 			if (ret == CTX_ACT_OK) {
-				/* TODO: CT lookup + RevDNAT inner header rewrite */
+				is_icmp_error = true;
 			}
 		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
@@ -520,7 +519,8 @@ skip_fib:
 
 	/* Cache is_fragment in advance, nodeport_fib_lookup_and_redirect may invalidate ip4. */
 	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
-			      l4_off, CT_INGRESS, SCOPE_REVERSE,
+			      is_icmp_error ? inner_l4_off : l4_off,
+				  CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT | CT_ENTRY_DSR,
 			      &ct_state, &monitor);
 
@@ -530,9 +530,13 @@ skip_fib:
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
-
-		ret = __lb4_rev_nat(ctx, l3_off, l4_off, &tuple,
+		if (!is_icmp_error) {
+			ret = __lb4_rev_nat(ctx, l3_off, l4_off, &tuple,
 				    &nat_info, false, ipfrag_has_l4_header(fraginfo));
+		} else {
+			//yama_todo: fix parameters passed to lb4_rev_nat_icmp4_error()
+			//ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l4_off, &tuple, &nat_info);
+		}
 		if (IS_ERR(ret))
 			return ret;
 
