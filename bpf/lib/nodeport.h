@@ -942,7 +942,7 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 			.ifindex	= ctx_get_ifindex(ctx),
 		},
 	};
-	int ret, l4_off, inner_l4_off;
+	int ret, l4_off, inner_l3_off;
 	const struct remote_endpoint_info *info __maybe_unused;
 	struct ipv6_ct_tuple tuple __align_stack_8 = {};
 	struct ct_state ct_state = {};
@@ -975,7 +975,7 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 	if (ret < 0) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			ret = lb6_extract_icmpv6_error_tuple(ctx, ip6, l4_off,
-							     &tuple, &inner_l4_off);
+							     &tuple, &inner_l3_off);
 			if (ret == CTX_ACT_OK)
 				is_icmp_error = true;
 		}
@@ -985,7 +985,7 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 	}
 
 	ret = ct_lazy_lookup6(get_ct_map6(&tuple), &tuple, ctx, fraginfo,
-			      is_icmp_error ? inner_l4_off : l4_off,
+			      is_icmp_error ? inner_l3_off : l4_off,
 			      CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
 	if (ret == CT_REPLY) {
@@ -1559,10 +1559,10 @@ static __always_inline int nodeport_lb6(struct __ctx_buff *ctx,
 	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
-			int inner_l4_off;
+			int inner_l3_off;
 
 			if (lb6_extract_icmpv6_error_tuple(ctx, ip6, l4_off,
-							   &tuple, &inner_l4_off) != CTX_ACT_OK)
+							   &tuple, &inner_l3_off) != CTX_ACT_OK)
 				is_svc_proto = false;
 			goto skip_service_lookup;
 		}
@@ -2263,7 +2263,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		},
 	};
 	const struct remote_endpoint_info *info __maybe_unused = NULL;
-	int ifindex = 0, ret, l3_off = ETH_HLEN, l4_off, inner_l4_off;
+	int ifindex = 0, ret, l3_off = ETH_HLEN, l4_off, inner_l3_off;
 	struct ipv4_ct_tuple tuple = {};
 	struct ct_state ct_state = {};
 	void *data, *data_end;
@@ -2288,7 +2288,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			ret = lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
-							    &tuple, &inner_l4_off);
+							    &tuple, &inner_l3_off);
 			if (ret == CTX_ACT_OK) {
 				is_icmp_error = true;
 			}
@@ -2317,9 +2317,9 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	else if (ret == CTX_ACT_REDIRECT)
 		goto redirect;
 
+	// yama_todo: tupleはひっくり返したものを入れてる
 	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
-			      is_icmp_error ? inner_l4_off : l4_off,
-				  CT_INGRESS, SCOPE_REVERSE,
+			      l4_off, CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
@@ -2929,10 +2929,10 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
-			int inner_l4_off;
+			int inner_l3_off;
 
 			if (lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
-							  &tuple, &inner_l4_off) != CTX_ACT_OK)
+							  &tuple, &inner_l3_off) != CTX_ACT_OK)
 				is_svc_proto = false;
 			goto skip_service_lookup;
 		}

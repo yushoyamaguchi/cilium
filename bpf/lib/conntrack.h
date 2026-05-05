@@ -346,6 +346,7 @@ ct_entry_matches_types(const struct ct_entry *entry __maybe_unused,
 	return false;
 }
 
+// yama_todo: icmp errorの時はtimeout設定しない
 /**
  * Returns CT_NEW or CT_ESTABLISHED.
  * 'ct_state', if not nullptr, will be filled in only if CT_ESTABLISHED is returned.
@@ -919,6 +920,7 @@ ct_extract_ports4(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo
 /* This defines the ct_is_reply4 function. */
 DEFINE_FUNC_CT_IS_REPLY(4)
 
+// yama_todo: この関数でl4_offを見てicmp_errorならばtcp_flagsには値をsetしない
 static __always_inline int
 __ct_lookup4(const void *map, struct ipv4_ct_tuple *tuple, struct __ctx_buff *ctx,
 	     fraginfo_t fraginfo, int l4_off, enum ct_dir dir, enum ct_scope scope,
