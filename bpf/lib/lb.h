@@ -926,7 +926,7 @@ lb6_extract_icmpv6_error_tuple(struct __ctx_buff *ctx __maybe_unused,
 			       const struct ipv6hdr *ip6 __maybe_unused,
 			       int l4_off __maybe_unused,
 			       struct ipv6_ct_tuple *tuple __maybe_unused,
-			       int *inner_l4_off __maybe_unused)
+			       int *inner_l3_off __maybe_unused)
 {
 	/* yama_todo: implement */
 	return DROP_UNSUPP_SERVICE_PROTO;
@@ -936,7 +936,7 @@ lb6_extract_icmpv6_error_tuple(struct __ctx_buff *ctx __maybe_unused,
 static __always_inline int
 lb6_rev_nat_icmp6_error(struct __ctx_buff *ctx,
 			int outer_l4_off, int inner_l3_off,
-			int inner_l4_off, __u8 inner_proto,
+			__u8 inner_proto,
 			const struct lb6_reverse_nat *nat,
 			bool has_inner_l4_header, enum ct_dir dir)
 {
@@ -1733,7 +1733,7 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx __maybe_unused,
 			      const struct iphdr *ip4 __maybe_unused,
 			      int l4_off __maybe_unused,
 			      struct ipv4_ct_tuple *tuple __maybe_unused,
-			      int *inner_l4_off __maybe_unused)
+			      int *inner_l3_off __maybe_unused)
 {
 	/* yama_todo: implement */
 	return DROP_UNSUPP_SERVICE_PROTO;
@@ -1743,7 +1743,7 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx __maybe_unused,
 static __always_inline int                                                                                                                                 
 lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 			      int outer_l3_off, int inner_l3_off,
-			      int inner_l4_off, __u8 inner_proto,
+			      __u8 inner_proto,
 			      const struct lb4_reverse_nat *nat,
 			      bool has_inner_l4_header)
 {
