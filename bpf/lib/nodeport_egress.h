@@ -167,7 +167,7 @@ nodeport_rev_dnat_fwd_ipv6(struct __ctx_buff *ctx, bool *snat_done,
 	fraginfo_t fraginfo;
 	struct ipv6hdr *ip6;
 	__u32 monitor = 0;
-	int ret, l4_off, inner_l3_off;
+    int ret, l4_off, inner_l3_off;
 	bool is_icmp_error = false;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
@@ -215,8 +215,7 @@ skip_fib:
 #endif
 
 	ret = ct_lazy_lookup6(get_ct_map6(&tuple), &tuple, ctx, fraginfo,
-			      is_icmp_error ? inner_l3_off : l4_off,
-			      CT_INGRESS, SCOPE_REVERSE,
+			      l4_off, CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT | CT_ENTRY_DSR,
 			      NULL, &monitor);
 	if (ret == CT_REPLY) {
