@@ -942,7 +942,7 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 			.ifindex	= ctx_get_ifindex(ctx),
 		},
 	};
-	int ret, l4_off, inner_l3_off;
+    int ret, l4_off, inner_l3_off;
 	const struct remote_endpoint_info *info __maybe_unused;
 	struct ipv6_ct_tuple tuple __align_stack_8 = {};
 	struct ct_state ct_state = {};
@@ -985,8 +985,7 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 	}
 
 	ret = ct_lazy_lookup6(get_ct_map6(&tuple), &tuple, ctx, fraginfo,
-			      is_icmp_error ? inner_l3_off : l4_off,
-			      CT_INGRESS, SCOPE_REVERSE,
+			      l4_off, CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
