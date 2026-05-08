@@ -24,3 +24,25 @@ icmp4_err_frag_needed_after_revnat = (
     IP(src=v4_node_one, dst=v4_pod_two, flags="DF") /
     TCP(sport=3030, dport=80)  # original port restored
 )
+
+
+# NodePort LB4 RevDNAT ICMP error scenario:
+# Backend (mac_five, v4_pod_two) sends ICMP Frag Needed to LB (host_mac_addr, v4_node_one)
+# complaining about the SNATed request (LB_IP:NODEPORT_PORT_MIN_NAT -> backend).
+nodeport_lb4_icmp_error_before = (
+    Ether(src=mac_five, dst=host_mac_addr) /
+    IP(src=v4_pod_two, dst=v4_node_one, ttl=64) /
+    ICMP(type=3, code=4, nexthopmtu=1500) /
+    IP(src=v4_node_one, dst=v4_pod_two, ttl=64, flags="DF") /
+    TCP(sport=32768, dport=8080, seq=tcp_default_seq, flags="S")
+)
+
+
+# After RevDNAT: ICMP error should target the original client (v4_ext_one:111 -> v4_svc_two:80).
+nodeport_lb4_icmp_error_after = (
+    Ether(src=mac_five, dst=host_mac_addr) /
+    IP(src=v4_svc_two, dst=v4_ext_one, ttl=64) /
+    ICMP(type=3, code=4, nexthopmtu=1500) /
+    IP(src=v4_ext_one, dst=v4_svc_two, ttl=64, flags="DF") /
+    TCP(sport=111, dport=tcp_svc_one, seq=tcp_default_seq, flags="S")
+)

@@ -4,6 +4,7 @@
 #include <bpf/ctx/skb.h>
 #include "common.h"
 #include "pktgen.h"
+#include "scapy.h"
 
 /* Enable code paths under test */
 #define ENABLE_IPV4
@@ -38,6 +39,10 @@ static volatile const __u8 *lb_mac = mac_host;
 static volatile const __u8 *node_mac = mac_three;
 static volatile const __u8 *local_backend_mac = mac_four;
 static volatile const __u8 *remote_backend_mac = mac_five;
+
+static const __u8 nodeport_icmp4_err_before_buf[] = {
+	SCAPY_BUF_BYTES(nodeport_lb4_icmp_error_before)
+};
 
 __section_entry
 int mock_handle_policy(struct __ctx_buff *ctx __maybe_unused)
@@ -149,6 +154,7 @@ mock_ctx_redirect(const struct __sk_buff *ctx __maybe_unused,
 #include "lib/endpoint.h"
 #include "lib/ipcache.h"
 #include "lib/lb.h"
+#include "lib/nat.h"
 
 ASSIGN_CONFIG(__u32, interface_ifindex, DEFAULT_IFACE)
 
@@ -882,6 +888,133 @@ CHECK("tc", "tc_nodeport_nat_fwd_reply_no_fib")
 int nodeport_nat_fwd_reply_no_fib_check(__maybe_unused const struct __ctx_buff *ctx)
 {
 	return check_reply(ctx);
+}
+
+static __always_inline int build_icmp_error(struct __ctx_buff *ctx)
+{
+	struct pktgen builder;
+
+	pktgen__init(&builder, ctx);
+	scapy_push_data(&builder, nodeport_icmp4_err_before_buf,
+			sizeof(nodeport_icmp4_err_before_buf));
+	pktgen__finish(&builder);
+
+	return 0;
+}
+
+/* Test that the LB RevDNATs an ICMP error reported by the remote backend.
+ * The test feeds the LB with an ICMP Frag Needed referencing the NATed
+ * request (LB_IP:NODEPORT_PORT_MIN_NAT -> backend). After RevDNAT the outer
+ * packet should target the original client and the embedded tuple should
+ * show client->service addresses/ports.
+ */
+PKTGEN("tc", "tc_nodeport_nat_fwd_icmp_error_revnat")
+int nodeport_nat_fwd_icmp_error_revnat_pktgen(struct __ctx_buff *ctx)
+{
+	return build_icmp_error(ctx);
+}
+
+SETUP("tc", "tc_nodeport_nat_fwd_icmp_error_revnat")
+int nodeport_nat_fwd_icmp_error_revnat_setup(struct __ctx_buff *ctx)
+{
+	__u16 revnat_id = 1;
+	__u32 key = 0;
+	struct mock_settings settings_value = {
+		.nat_source_port = __bpf_htons(NODEPORT_PORT_MIN_NAT),
+		.fail_fib = false,
+	};
+	struct ipv4_ct_tuple tuple = {
+		.daddr = LB_IP,
+		.saddr = BACKEND_IP_REMOTE,
+		.dport = __bpf_htons(NODEPORT_PORT_MIN_NAT),
+		.sport = BACKEND_PORT,
+		.nexthdr = IPPROTO_TCP,
+		.flags = NAT_DIR_INGRESS,
+	};
+	struct ipv4_nat_entry entry = {
+		.to_daddr = CLIENT_IP,
+		.to_dport = CLIENT_PORT,
+	};
+
+	lb_v4_add_service(FRONTEND_IP_REMOTE, FRONTEND_PORT, IPPROTO_TCP, 1, revnat_id);
+	lb_v4_add_backend(FRONTEND_IP_REMOTE, FRONTEND_PORT, 1, 124,
+			  BACKEND_IP_REMOTE, BACKEND_PORT, IPPROTO_TCP, 0);
+
+	ipcache_v4_add_entry(BACKEND_IP_REMOTE, 0, 112233, 0, 0);
+
+	map_update_elem(&settings_map, &key, &settings_value, BPF_ANY);
+	map_update_elem(&cilium_snat_v4_external, &tuple, &entry, BPF_ANY);
+
+	return netdev_receive_packet(ctx);
+}
+
+CHECK("tc", "tc_nodeport_nat_fwd_icmp_error_revnat")
+int nodeport_nat_fwd_icmp_error_revnat_check(const struct __ctx_buff *ctx)
+{
+	void *data, *data_end;
+	struct iphdr *outer_ip, *inner_ip;
+	struct icmphdr *icmp;
+	struct tcphdr *inner_tcp;
+	__u32 *status_code;
+	__u32 outer_ihl, inner_ihl;
+
+	test_init();
+
+	data = (void *)(long)ctx_data(ctx);
+	data_end = (void *)(long)ctx->data_end;
+
+	if (data + sizeof(__u32) + sizeof(struct ethhdr) > data_end)
+		test_fatal("status code out of bounds");
+
+	status_code = data;
+
+	assert(*status_code == CTX_ACT_REDIRECT);
+
+	outer_ip = data + sizeof(__u32) + sizeof(struct ethhdr);
+	if ((void *)outer_ip + sizeof(*outer_ip) > data_end)
+		test_fatal("outer ip out of bounds");
+
+	outer_ihl = outer_ip->ihl * 4;
+	if (outer_ihl < sizeof(*outer_ip))
+		test_fatal("invalid outer ihl");
+	if ((void *)outer_ip + outer_ihl + sizeof(struct icmphdr) > data_end)
+		test_fatal("icmp header out of bounds");
+
+	if (outer_ip->saddr != FRONTEND_IP_REMOTE)
+		test_fatal("outer src IP mismatch");
+	if (outer_ip->daddr != CLIENT_IP)
+		test_fatal("outer dst IP mismatch");
+	if (outer_ip->protocol != IPPROTO_ICMP)
+		test_fatal("outer protocol is not ICMP");
+
+	icmp = (void *)outer_ip + outer_ihl;
+	if (icmp->type != ICMP_DEST_UNREACH || icmp->code != ICMP_FRAG_NEEDED)
+		test_fatal("unexpected ICMP type/code (%u/%u)", icmp->type, icmp->code);
+
+	inner_ip = (void *)icmp + sizeof(*icmp);
+	if ((void *)inner_ip + sizeof(*inner_ip) > data_end)
+		test_fatal("inner ip out of bounds");
+
+	inner_ihl = inner_ip->ihl * 4;
+	if (inner_ihl < sizeof(*inner_ip))
+		test_fatal("invalid inner ihl");
+	if ((void *)inner_ip + inner_ihl + sizeof(struct tcphdr) > data_end)
+		test_fatal("inner tcp out of bounds");
+
+	if (inner_ip->saddr != CLIENT_IP)
+		test_fatal("inner src IP mismatch");
+	if (inner_ip->daddr != FRONTEND_IP_REMOTE)
+		test_fatal("inner dst IP mismatch");
+	if (inner_ip->protocol != IPPROTO_TCP)
+		test_fatal("inner protocol is not TCP");
+
+	inner_tcp = (void *)inner_ip + inner_ihl;
+	if (inner_tcp->source != CLIENT_PORT)
+		test_fatal("inner sport mismatch");
+	if (inner_tcp->dest != FRONTEND_PORT)
+		test_fatal("inner dport mismatch");
+
+	test_finish();
 }
 
 /* The following three tests are checking the scenario where a Rev NAT entry gets
