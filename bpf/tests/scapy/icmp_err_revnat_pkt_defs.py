@@ -41,7 +41,7 @@ nodeport_lb4_icmp_error_before = (
 # After RevDNAT: ICMP error should target the original client (v4_ext_one:111 -> v4_svc_two:80).
 nodeport_lb4_icmp_error_after = (
     Ether(src=mac_five, dst=host_mac_addr) /
-    IP(src=v4_svc_two, dst=v4_ext_one, ttl=64) /
+    IP(src=v4_svc_two, dst=v4_ext_one, ttl=63) /
     ICMP(type=3, code=4, nexthopmtu=1500) /
     IP(src=v4_ext_one, dst=v4_svc_two, ttl=64, flags="DF") /
     TCP(sport=111, dport=tcp_svc_one, seq=tcp_default_seq, flags="S")

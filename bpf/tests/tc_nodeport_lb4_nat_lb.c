@@ -44,6 +44,10 @@ static const __u8 nodeport_icmp4_err_before_buf[] = {
 	SCAPY_BUF_BYTES(nodeport_lb4_icmp_error_before)
 };
 
+static const __u8 nodeport_icmp4_err_after_buf[] = {
+	SCAPY_BUF_BYTES(nodeport_lb4_icmp_error_after)
+};
+
 __section_entry
 int mock_handle_policy(struct __ctx_buff *ctx __maybe_unused)
 {
@@ -935,6 +939,19 @@ int nodeport_nat_fwd_icmp_error_revnat_setup(struct __ctx_buff *ctx)
 		.to_daddr = CLIENT_IP,
 		.to_dport = CLIENT_PORT,
 	};
+	struct ipv4_ct_tuple ct_tuple = {
+		.saddr = CLIENT_IP,
+		.daddr = BACKEND_IP_REMOTE,
+		.dport = BACKEND_PORT,
+		.sport = CLIENT_PORT,
+		.nexthdr = IPPROTO_TCP,
+		.flags = TUPLE_F_OUT,
+	};
+	struct ct_state ct_state_entry = {
+		.node_port = 1,
+		.rev_nat_index = revnat_id,
+		.src_sec_id = WORLD_IPV4_ID,
+	};
 
 	lb_v4_add_service(FRONTEND_IP_REMOTE, FRONTEND_PORT, IPPROTO_TCP, 1, revnat_id);
 	lb_v4_add_backend(FRONTEND_IP_REMOTE, FRONTEND_PORT, 1, 124,
@@ -945,6 +962,17 @@ int nodeport_nat_fwd_icmp_error_revnat_setup(struct __ctx_buff *ctx)
 	map_update_elem(&settings_map, &key, &settings_value, BPF_ANY);
 	map_update_elem(&cilium_snat_v4_external, &tuple, &entry, BPF_ANY);
 
+	__ipv4_ct_tuple_reverse(&ct_tuple);
+	if (ct_create4(get_ct_map4(&ct_tuple), NULL, &ct_tuple, ctx,
+		       CT_EGRESS, &ct_state_entry, NULL) < 0)
+		return TEST_ERROR;
+
+struct ipv4_ct_tuple ct_tuple_related = ct_tuple;
+ct_tuple_related.flags |= TUPLE_F_RELATED;
+if (ct_create4(get_ct_map4(&ct_tuple_related), NULL, &ct_tuple_related, ctx,
+		       CT_EGRESS, &ct_state_entry, NULL) < 0)
+		return TEST_ERROR;
+		
 	return netdev_receive_packet(ctx);
 }
 
@@ -952,11 +980,7 @@ CHECK("tc", "tc_nodeport_nat_fwd_icmp_error_revnat")
 int nodeport_nat_fwd_icmp_error_revnat_check(const struct __ctx_buff *ctx)
 {
 	void *data, *data_end;
-	struct iphdr *outer_ip, *inner_ip;
-	struct icmphdr *icmp;
-	struct tcphdr *inner_tcp;
 	__u32 *status_code;
-	__u32 outer_ihl, inner_ihl;
 
 	test_init();
 
@@ -970,49 +994,12 @@ int nodeport_nat_fwd_icmp_error_revnat_check(const struct __ctx_buff *ctx)
 
 	assert(*status_code == CTX_ACT_REDIRECT);
 
-	outer_ip = data + sizeof(__u32) + sizeof(struct ethhdr);
-	if ((void *)outer_ip + sizeof(*outer_ip) > data_end)
-		test_fatal("outer ip out of bounds");
-
-	outer_ihl = outer_ip->ihl * 4;
-	if (outer_ihl < sizeof(*outer_ip))
-		test_fatal("invalid outer ihl");
-	if ((void *)outer_ip + outer_ihl + sizeof(struct icmphdr) > data_end)
-		test_fatal("icmp header out of bounds");
-
-	if (outer_ip->saddr != FRONTEND_IP_REMOTE)
-		test_fatal("outer src IP mismatch");
-	if (outer_ip->daddr != CLIENT_IP)
-		test_fatal("outer dst IP mismatch");
-	if (outer_ip->protocol != IPPROTO_ICMP)
-		test_fatal("outer protocol is not ICMP");
-
-	icmp = (void *)outer_ip + outer_ihl;
-	if (icmp->type != ICMP_DEST_UNREACH || icmp->code != ICMP_FRAG_NEEDED)
-		test_fatal("unexpected ICMP type/code (%u/%u)", icmp->type, icmp->code);
-
-	inner_ip = (void *)icmp + sizeof(*icmp);
-	if ((void *)inner_ip + sizeof(*inner_ip) > data_end)
-		test_fatal("inner ip out of bounds");
-
-	inner_ihl = inner_ip->ihl * 4;
-	if (inner_ihl < sizeof(*inner_ip))
-		test_fatal("invalid inner ihl");
-	if ((void *)inner_ip + inner_ihl + sizeof(struct tcphdr) > data_end)
-		test_fatal("inner tcp out of bounds");
-
-	if (inner_ip->saddr != CLIENT_IP)
-		test_fatal("inner src IP mismatch");
-	if (inner_ip->daddr != FRONTEND_IP_REMOTE)
-		test_fatal("inner dst IP mismatch");
-	if (inner_ip->protocol != IPPROTO_TCP)
-		test_fatal("inner protocol is not TCP");
-
-	inner_tcp = (void *)inner_ip + inner_ihl;
-	if (inner_tcp->source != CLIENT_PORT)
-		test_fatal("inner sport mismatch");
-	if (inner_tcp->dest != FRONTEND_PORT)
-		test_fatal("inner dport mismatch");
+	ASSERT_CTX_BUF_OFF("tc_nodeport_lb4_icmp_error_after",
+			   "Ether",
+			   ctx,
+			   sizeof(__u32),
+			   nodeport_icmp4_err_after_buf,
+			   sizeof(nodeport_icmp4_err_after_buf));
 
 	test_finish();
 }

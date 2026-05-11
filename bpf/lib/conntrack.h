@@ -662,6 +662,7 @@ ct_extract_ports6(const struct __ctx_buff *ctx, struct ipv6hdr *ip6, fraginfo_t 
 /* This defines the ct_is_reply6 function. */
 DEFINE_FUNC_CT_IS_REPLY(6)
 
+// yama_todo: この関数でl4_offを見てicmp_errorならばtcp_flagsには値をsetしない
 static __always_inline int
 __ct_lookup6(const void *map, struct ipv6_ct_tuple *tuple, const struct __ctx_buff *ctx,
 	     fraginfo_t fraginfo, int l4_off, enum ct_dir dir, enum ct_scope scope,

@@ -981,7 +981,8 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
 		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			goto out;
-		return ret;
+		if (!is_icmp_error)
+			return ret;
 	}
 
 	ret = ct_lazy_lookup6(get_ct_map6(&tuple), &tuple, ctx, fraginfo,
@@ -2265,7 +2266,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		},
 	};
 	const struct remote_endpoint_info *info __maybe_unused = NULL;
-	int ifindex = 0, ret, l3_off = ETH_HLEN, l4_off, inner_l3_off;
+	int ifindex = 0, ret, l3_off = ETH_HLEN, l4_off, inner_l3_off = 0;
 	struct ipv4_ct_tuple tuple = {};
 	struct ct_state ct_state = {};
 	void *data, *data_end;
@@ -2291,14 +2292,14 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			ret = lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
 							    &tuple, &inner_l3_off);
-			if (ret == CTX_ACT_OK) {
+			if (ret == CTX_ACT_OK)
 				is_icmp_error = true;
-			}
 		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			goto skip_revdnat;
 
-		return ret;
+		if (ret < 0)
+			return ret;
 	}
 
 #if defined(ENABLE_SRV6) && defined(IS_BPF_LXC)
@@ -2319,7 +2320,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	else if (ret == CTX_ACT_REDIRECT)
 		goto redirect;
 
-	// yama_todo: tupleはひっくり返したものを入れてる
+	// yama_memo: tupleはひっくり返したものを入れてる
 	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
 			      l4_off, CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
@@ -2331,8 +2332,13 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 					ct_state.rev_nat_index, 0, 0,
 					false, &tuple, ipfrag_has_l4_header(fraginfo));
 		} else {
-			// yama_todo: fix parameters passed to lb4_rev_nat_icmp4_error()
-			//lb4_rev_nat_icmp4_error()
+			const struct lb4_reverse_nat *nat;
+
+			nat = lb4_lookup_rev_nat_entry(ctx, ct_state.rev_nat_index);
+			if (!nat)
+				ret = 0;
+			else
+				ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off, nat);
 		}
 		if (IS_ERR(ret))
 			return ret;

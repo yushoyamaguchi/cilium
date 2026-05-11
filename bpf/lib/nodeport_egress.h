@@ -473,7 +473,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 			   struct trace_ctx *trace, __s8 *ext_err __maybe_unused)
 {
 	struct bpf_fib_lookup_padded fib_params __maybe_unused = {};
-	int ret, l3_off = ETH_HLEN, l4_off, inner_l3_off;
+	int ret, l3_off = ETH_HLEN, l4_off, inner_l3_off = 0;
 	struct lb4_reverse_nat nat_info;
 	struct ipv4_ct_tuple tuple = {};
 	struct ct_state ct_state = {};
@@ -542,8 +542,7 @@ skip_fib:
 			ret = __lb4_rev_nat(ctx, l3_off, l4_off, &tuple,
 				    &nat_info, false, ipfrag_has_l4_header(fraginfo));
 		} else {
-			//yama_todo: fix parameters passed to lb4_rev_nat_icmp4_error()
-			//ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off, &tuple, &nat_info);
+			ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off, &nat_info);
 		}
 		if (IS_ERR(ret))
 			return ret;
