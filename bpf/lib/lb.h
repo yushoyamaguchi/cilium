@@ -1800,6 +1800,7 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
 		    ctx_load_bytes(ctx, inner_l4_off, &tuple->dport,
 				   sizeof(tuple->dport) + sizeof(tuple->sport)) < 0)
 			return DROP_INVALID;
+		ipv4_ct_tuple_swap_ports(tuple);
 		break;
 	case IPPROTO_ICMP: {
 		struct icmphdr inner_icmp;
