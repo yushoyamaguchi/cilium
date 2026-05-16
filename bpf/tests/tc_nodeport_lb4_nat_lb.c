@@ -942,8 +942,8 @@ int nodeport_nat_fwd_icmp_error_revnat_setup(struct __ctx_buff *ctx)
 	struct ipv4_ct_tuple ct_tuple = {
 		.saddr = CLIENT_IP,
 		.daddr = BACKEND_IP_REMOTE,
-		.dport = BACKEND_PORT,
-		.sport = CLIENT_PORT,
+		.dport = CLIENT_PORT,
+		.sport = BACKEND_PORT,
 		.nexthdr = IPPROTO_TCP,
 		.flags = TUPLE_F_OUT,
 	};
