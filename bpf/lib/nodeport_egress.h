@@ -495,13 +495,13 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			ret = lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
 							    &tuple, &inner_l3_off);
-			if (ret == CTX_ACT_OK) {
+			if (ret == CTX_ACT_OK)
 				is_icmp_error = true;
-			}
 		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			return CTX_ACT_OK;
-		return ret;
+		if (ret < 0)
+			return ret;
 	}
 
 	if (!nodeport_rev_dnat_get_info_ipv4(ctx, &tuple, &nat_info))
