@@ -472,6 +472,8 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	struct ct_state ct_state = {};
 	void *data, *data_end;
 	struct iphdr *ip4;
+	const __be32 yama_client = bpf_htonl(0xAC130001);
+	bool yama_watch = false;
 	fraginfo_t fraginfo;
 	__u32 monitor = 0;
 	bool is_icmp_error = false;
@@ -497,8 +499,16 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 			return ret;
 	}
 
-	if (!nodeport_rev_dnat_get_info_ipv4(ctx, &tuple, &nat_info))
+	if (!nodeport_rev_dnat_get_info_ipv4(ctx, &tuple, &nat_info)) {
+		yama_watch = tuple.saddr == yama_client || tuple.daddr == yama_client;
+		if (yama_watch) {
+			printk("yama_debug1\n");
+			cilium_dbg(ctx, 169, 169, 169);
+		}
 		return CTX_ACT_OK;
+	}
+
+	yama_watch = tuple.saddr == yama_client || tuple.daddr == yama_client;
 
 #if defined(IS_BPF_HOST)
 	if (revdnat_only)
@@ -525,10 +535,19 @@ skip_fib:
 			      CT_ENTRY_NODEPORT | CT_ENTRY_DSR,
 			      &ct_state, &monitor);
 
+	if (yama_watch) {
+		printk("yama_debug4\n");
+		cilium_dbg(ctx, 172, ret, ct_state.rev_nat_index);
+	}
+
 	/* nodeport_rev_dnat_get_info_ipv4() just checked that such a
 	 * CT entry exists:
 	 */
 	if (ret == CT_REPLY) {
+		if (yama_watch) {
+			printk("yama_debug5\n");
+			cilium_dbg(ctx, 173, is_icmp_error, nat_info.port);
+		}
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
 		if (!is_icmp_error) {

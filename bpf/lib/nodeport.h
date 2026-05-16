@@ -2194,10 +2194,22 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 				struct lb4_reverse_nat *nat_info)
 {
 	const struct ct_entry *entry;
+	const __be32 yama_client = bpf_htonl(0xAC130001); /* 172.19.0.1 */
+	bool yama_watch = tuple->saddr == yama_client || tuple->daddr == yama_client;
 
 	entry = ct_get_nodeport_egress_entry4(get_ct_map4(tuple), tuple);
-	if (!entry)
+	if (!entry) {
+		if (yama_watch) {
+			printk("yama_debug2\n");
+			cilium_dbg(ctx, 170, 0, 0);
+		}
 		return false;
+	}
+
+	if (yama_watch) {
+		printk("yama_debug3\n");
+		cilium_dbg(ctx, 171, entry->node_port, entry->dsr_internal);
+	}
 
 	if (entry->node_port) {
 		if (entry->rev_nat_index) {
