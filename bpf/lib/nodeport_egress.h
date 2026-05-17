@@ -535,19 +535,10 @@ skip_fib:
 			      CT_ENTRY_NODEPORT | CT_ENTRY_DSR,
 			      &ct_state, &monitor);
 
-	if (yama_watch) {
-		printk("yama_debug4\n");
-		cilium_dbg(ctx, 172, ret, ct_state.rev_nat_index);
-	}
-
 	/* nodeport_rev_dnat_get_info_ipv4() just checked that such a
 	 * CT entry exists:
 	 */
 	if (ret == CT_REPLY) {
-		if (yama_watch) {
-			printk("yama_debug5\n");
-			cilium_dbg(ctx, 173, is_icmp_error, nat_info.port);
-		}
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
 		if (!is_icmp_error) {

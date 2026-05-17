@@ -2200,15 +2200,12 @@ nodeport_rev_dnat_get_info_ipv4(struct __ctx_buff *ctx,
 	entry = ct_get_nodeport_egress_entry4(get_ct_map4(tuple), tuple);
 	if (!entry) {
 		if (yama_watch) {
-			printk("yama_debug2\n");
-			cilium_dbg(ctx, 170, 0, 0);
+			printk("yama_debug2a: saddr=%x, daddr=%x\n",bpf_htonl(tuple->saddr), bpf_htonl(tuple->daddr));
+			printk("yama_debug2b: sport=%x, dport=%x\n",bpf_htons(tuple->sport), bpf_htons(tuple->dport));
+			cilium_dbg(ctx, 170, bpf_htonl(tuple->saddr), bpf_htonl(tuple->daddr));
+			cilium_dbg(ctx, 171, bpf_htons(tuple->sport), bpf_htons(tuple->dport));
 		}
 		return false;
-	}
-
-	if (yama_watch) {
-		printk("yama_debug3\n");
-		cilium_dbg(ctx, 171, entry->node_port, entry->dsr_internal);
 	}
 
 	if (entry->node_port) {
