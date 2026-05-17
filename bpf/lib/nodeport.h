@@ -2137,14 +2137,25 @@ nodeport_dsr_ingress_ipv4(struct __ctx_buff *ctx, struct ipv4_ct_tuple *tuple, f
 {
 	struct ct_state ct_state_new = {};
 	__u32 monitor = 0;
+	const __be32 yama_client = bpf_htonl(0xAC130001);
+	bool yama_watch = tuple->saddr == yama_client || tuple->daddr == yama_client;
 	int ret;
 
 	/* lookup with SCOPE_FORWARD: */
 	__ipv4_ct_tuple_reverse(tuple);
 
+	if (yama_watch) {
+		printk("yama_debug_ingress_start_saddr: %x\n", bpf_htonl(tuple->saddr));
+		printk("yama_debug_ingress_start_daddr: %x\n", bpf_htonl(tuple->daddr));
+		printk("yama_debug_ingress_start_port: %x\n", bpf_htons(port));
+		cilium_dbg(ctx, 192, bpf_htonl(addr), bpf_htons(port));
+	}
+
 	ret = ct_lazy_lookup4(get_ct_map4(tuple), tuple, ctx, fraginfo,
 			      l4_off, CT_EGRESS, SCOPE_FORWARD,
 			      CT_ENTRY_DSR, NULL, &monitor);
+	if (yama_watch)
+		printk("yama_debug_ingress_lookup_ret: %d\n", ret);
 	if (ret < 0)
 		return ret;
 
@@ -2165,6 +2176,8 @@ create_ct:
 
 		ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
 				 CT_EGRESS, &ct_state_new, ext_err);
+		if (yama_watch)
+			printk("yama_debug_ingress_ct_create_ret: %d\n", ret);
 		if (IS_ERR(ret))
 			return ret;
 		break;
@@ -2174,6 +2187,8 @@ create_ct:
 		 */
 		if (tuple->nexthdr == IPPROTO_TCP && port)
 			goto create_ct;
+		if (yama_watch)
+			printk("yama_debug_ingress_ct_established\n");
 
 		/* Otherwise we tolerate DSR info on an established connection.
 		 * TODO: obtain NAT info from CT lookup, and compare it against
@@ -2985,19 +3000,35 @@ skip_service_lookup:
     ((defined(IS_BPF_XDP) || defined(IS_BPF_HOST) || defined(IS_BPF_WIREGUARD)) && \
      (DSR_ENCAP_MODE == DSR_ENCAP_NONE))
 	if (is_svc_proto) {
+		const __be32 yama_client = bpf_htonl(0xAC130001);
+		bool yama_watch = tuple.saddr == yama_client || tuple.daddr == yama_client;
+
 		/* Check if packet has embedded DSR info, or belongs to
 		 * an established DSR connection:
 		 */
 		ret = nodeport_extract_dsr_v4(ctx, ip4, &tuple,
 					      l4_off, &key.address,
 					      &key.dport, dsr);
+		if (yama_watch) {
+			printk("yama_debug_extract_ret: %d\n", ret);
+			printk("yama_debug_extract_dsr: %d\n", *dsr);
+			printk("yama_debug_extract_addr: %x\n", bpf_htonl(key.address));
+			printk("yama_debug_extract_port: %x\n", bpf_htons(key.dport));
+			cilium_dbg(ctx, 190, ret, *dsr);
+		}
 		if (IS_ERR(ret))
 			return ret;
-		if (*dsr)
+		if (*dsr) {
+			if (yama_watch) {
+				printk("yama_debug_extract_hit_saddr: %x\n", bpf_htonl(tuple.saddr));
+				printk("yama_debug_extract_hit_daddr: %x\n", bpf_htonl(tuple.daddr));
+				cilium_dbg(ctx, 191, bpf_htonl(tuple.saddr), bpf_htonl(tuple.daddr));
+			}
 			/* Packet continues on its way to local backend: */
 			return nodeport_dsr_ingress_ipv4(ctx, &tuple, fraginfo, l4_off,
 							 key.address, key.dport,
 							 ext_err);
+		}
 	}
 #endif
 #endif /* ENABLE_DSR */
