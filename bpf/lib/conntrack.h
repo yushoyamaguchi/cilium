@@ -1009,7 +1009,16 @@ ct_lazy_lookup4(const void *map, struct ipv4_ct_tuple *tuple, struct __ctx_buff 
 		fraginfo_t fraginfo, int l4_off, enum ct_dir dir, enum ct_scope scope,
 		__u32 ct_entry_types, struct ct_state *ct_state, __u32 *monitor)
 {
+	const __be32 yama_client = bpf_htonl(0xAC130001); /* 172.19.0.1 */
+	bool yama_watch = tuple->saddr == yama_client || tuple->daddr == yama_client;
+
 	tuple->flags = ct_lookup_select_tuple_type(dir, scope);
+	if (yama_watch) {
+		printk("yama_debug3a: saddr=%x, daddr=%x\n",bpf_htonl(tuple->saddr), bpf_htonl(tuple->daddr));
+		printk("yama_debug3b: sport=%x, dport=%x\n",bpf_htons(tuple->sport), bpf_htons(tuple->dport));
+		cilium_dbg(ctx, 180, bpf_htonl(tuple->saddr), bpf_htonl(tuple->daddr));
+		cilium_dbg(ctx, 181, bpf_htons(tuple->sport), bpf_htons(tuple->dport));
+	}
 
 	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, dir,
 			    scope, ct_entry_types, ct_state, monitor);
