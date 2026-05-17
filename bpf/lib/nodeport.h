@@ -2327,6 +2327,10 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		goto redirect;
 
 	// yama_memo: tupleはひっくり返したものを入れてる
+	printk("yama_debug3a: saddr=%x, daddr=%x\n",bpf_htonl(tuple.saddr), bpf_htonl(tuple.daddr));
+	printk("yama_debug3b: sport=%x, dport=%x\n",bpf_htons(tuple.sport), bpf_htons(tuple.dport));
+	cilium_dbg(ctx, 180, bpf_htonl(tuple.saddr), bpf_htonl(tuple.daddr));
+	cilium_dbg(ctx, 181, bpf_htons(tuple.sport), bpf_htons(tuple.dport));
 	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
 			      l4_off, CT_INGRESS, SCOPE_REVERSE,
 			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
