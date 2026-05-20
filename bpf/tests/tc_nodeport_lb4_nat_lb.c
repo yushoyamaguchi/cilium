@@ -957,19 +957,8 @@ int nodeport_nat_fwd_icmp_error_revnat_setup(struct __ctx_buff *ctx)
 	lb_v4_add_backend(FRONTEND_IP_REMOTE, FRONTEND_PORT, 1, 124,
 			  BACKEND_IP_REMOTE, BACKEND_PORT, IPPROTO_TCP, 0);
 
-	ipcache_v4_add_entry(BACKEND_IP_REMOTE, 0, 112233, 0, 0);
-
-	map_update_elem(&settings_map, &key, &settings_value, BPF_ANY);
-	map_update_elem(&cilium_snat_v4_external, &tuple, &entry, BPF_ANY);
-
 	__ipv4_ct_tuple_reverse(&ct_tuple);
 	if (ct_create4(get_ct_map4(&ct_tuple), NULL, &ct_tuple, ctx,
-		       CT_EGRESS, &ct_state_entry, NULL) < 0)
-		return TEST_ERROR;
-
-struct ipv4_ct_tuple ct_tuple_related = ct_tuple;
-ct_tuple_related.flags |= TUPLE_F_RELATED;
-if (ct_create4(get_ct_map4(&ct_tuple_related), NULL, &ct_tuple_related, ctx,
 		       CT_EGRESS, &ct_state_entry, NULL) < 0)
 		return TEST_ERROR;
 		
