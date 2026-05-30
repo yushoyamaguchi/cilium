@@ -661,6 +661,7 @@ ct_extract_ports6(const struct __ctx_buff *ctx, const struct ipv6hdr *ip6, fragi
 /* This defines the ct_is_reply6 function. */
 DEFINE_FUNC_CT_IS_REPLY(6)
 
+// yama_todo: この関数でl4_offを見てicmp_errorならばtcp_flagsには値をsetしない
 static __always_inline int
 __ct_lookup6(const void *map, struct ipv6_ct_tuple *tuple, const struct __ctx_buff *ctx,
 	     fraginfo_t fraginfo, int l4_off, enum ct_dir dir, enum ct_scope scope,
@@ -1010,6 +1011,56 @@ ct_lazy_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx
 
 	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, dir,
 			    scope, ct_entry_types, ct_state, monitor);
+}
+
+/**
+ * ct_lazy_lookup4_icmp_error - CT lookup for an ICMP error packet whose inner
+ * tuple identifies an existing IPv4 connection.
+ *
+ * Unlike ct_lazy_lookup4(), this function:
+ *  - does not read TCP flags from l4_off (l4_off points to the outer ICMP
+ *    header, not the inner TCP header, so reading flags would yield garbage
+ *    and could corrupt CT entry state), and
+ *  - does not refresh the CT entry timeout (ICMP error packets are error
+ *    notifications, not data traffic, matching Linux nf_conntrack behaviour).
+ *
+ * Only supports SCOPE_REVERSE (ICMP errors always travel in the return path).
+ */
+static __always_inline int
+ct_lazy_lookup4_icmp_error(const void *map, struct ipv4_ct_tuple *tuple,
+			   const struct __ctx_buff *ctx,
+			   fraginfo_t fraginfo __maybe_unused,
+			   int l4_off __maybe_unused, enum ct_dir dir,
+			   enum ct_scope scope, __u32 ct_entry_types,
+			   struct ct_state *ct_state, __u32 *monitor)
+{
+	struct ct_entry *entry;
+
+	tuple->flags = ct_lookup_select_tuple_type(dir, scope);
+
+	entry = map_lookup_elem(map, tuple);
+	if (!entry || !ct_entry_matches_types(entry, ct_entry_types, ct_state))
+		goto ct_new;
+
+	cilium_dbg(ctx, DBG_CT_MATCH, entry->lifetime, entry->rev_nat_index);
+
+	if (CONFIG(enable_conntrack_accounting)) {
+		__sync_fetch_and_add(&entry->packets, 1);
+		__sync_fetch_and_add(&entry->bytes, ctx_full_len(ctx));
+	}
+
+	if (ct_state)
+		ct_lookup_fill_state(ct_state, entry, dir, false);
+
+	cilium_dbg(ctx, DBG_CT_VERDICT, CT_REPLY,
+		   ct_state ? ct_state->rev_nat_index : 0);
+	*monitor = TRACE_PAYLOAD_LEN;
+	return CT_REPLY;
+
+ct_new:
+	cilium_dbg(ctx, DBG_CT_VERDICT, CT_NEW, 0);
+	*monitor = TRACE_PAYLOAD_LEN;
+	return CT_NEW;
 }
 
 /* Offset must point to IPv4 header */
