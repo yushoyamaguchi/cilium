@@ -909,6 +909,45 @@ lb6_extract_tuple(struct __ctx_buff *ctx, struct ipv6hdr *ip6, fraginfo_t fragin
 	}
 }
 
+/**
+ * Extract CT tuple from the embedded original packet inside an ICMPv6 error.
+ *
+ * Fills @tuple with the reverse-direction representation of the original packet
+ * (saddr/daddr swapped, ports swapped) so callers can use it directly for a
+ * SCOPE_REVERSE CT lookup.
+ *
+ * Returns:
+ *   - CTX_ACT_OK on success
+ *   - DROP_UNSUPP_SERVICE_PROTO if not an ICMPv6 error or inner proto unsupported
+ *   - Negative error code on parse failure
+ */
+static __always_inline int
+lb6_extract_icmpv6_error_tuple(struct __ctx_buff *ctx __maybe_unused,
+			       const struct ipv6hdr *ip6 __maybe_unused,
+			       int l4_off __maybe_unused,
+			       struct ipv6_ct_tuple *tuple __maybe_unused,
+			       int *inner_l3_off __maybe_unused)
+{
+	/* yama_todo: implement */
+	return DROP_UNSUPP_SERVICE_PROTO;
+}
+
+// yama_todo: fix parameters and implement
+static __always_inline int
+lb6_rev_nat_icmp6_error(struct __ctx_buff *ctx __maybe_unused,
+		int outer_l4_off __maybe_unused,
+		int inner_l3_off __maybe_unused,
+		__u8 inner_proto __maybe_unused,
+		const struct lb6_reverse_nat *nat __maybe_unused,
+		bool has_inner_l4_header __maybe_unused,
+		enum ct_dir dir __maybe_unused)
+{
+	/* inner IP daddr: backend → nat->address */
+	/* inner L4 dport: backend port → nat->port */
+	/* outer ICMPv6 checksum update */
+	return 0;
+}
+
 static __always_inline
 bool lb6_src_range_ok(const struct lb6_service *svc __maybe_unused,
 		      const union v6addr *saddr __maybe_unused)
@@ -1699,6 +1738,282 @@ lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo
 	default:
 		return DROP_UNKNOWN_L4;
 	}
+}
+
+/**
+ * Extract CT tuple from the embedded original packet inside an ICMPv4 error.
+ *
+ * Fills @tuple with the reverse-direction representation of the original packet
+ * (saddr/daddr swapped, ports swapped) so callers can use it directly for a
+ * SCOPE_REVERSE CT lookup.
+ *
+ * Returns:
+ *   - CTX_ACT_OK on success
+ *   - DROP_UNSUPP_SERVICE_PROTO if not an ICMP error or inner proto unsupported
+ *   - Negative error code on parse failure
+ */
+static __always_inline int
+lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
+			      const struct iphdr *ip4,
+			      int l4_off,
+			      struct ipv4_ct_tuple *tuple,
+			      int *inner_l3_off)
+{
+	struct icmphdr icmph;
+	struct iphdr inner_ip4;
+	fraginfo_t fraginfo;
+	__u32 inner_offset;
+	__u32 inner_l4_off;
+	__u64 ctx_len = ctx_full_len(ctx);
+	bool has_inner_l4 = false;
+
+	/* Outer packet must not be fragmented. */
+	fraginfo = ipfrag_encode_ipv4(ip4);
+	if (ipfrag_is_fragment(fraginfo))
+		return DROP_UNSUPP_SERVICE_PROTO;
+
+	if (ctx_load_bytes(ctx, (__u32)l4_off, &icmph, sizeof(icmph)) < 0)
+		return DROP_INVALID;
+
+	switch (icmph.type) {
+	case ICMP_DEST_UNREACH:
+		if (icmph.code > NR_ICMP_UNREACH)
+			return DROP_UNSUPP_SERVICE_PROTO;
+		break;
+	case ICMP_SOURCE_QUENCH:
+	case ICMP_TIME_EXCEEDED:
+		break;
+	case ICMP_PARAMETERPROB:
+		break;
+	default:
+		return DROP_UNSUPP_SERVICE_PROTO;
+	}
+
+	inner_offset = (__u32)(l4_off + sizeof(struct icmphdr));
+	if (inner_l3_off)
+		*inner_l3_off = (int)inner_offset;
+
+	if ((__u64)inner_offset + sizeof(inner_ip4) > ctx_len)
+		return DROP_INVALID;
+	if (ctx_load_bytes(ctx, inner_offset, &inner_ip4, sizeof(inner_ip4)) < 0)
+		return DROP_INVALID;
+
+	if (inner_ip4.ihl < 5)
+		return DROP_INVALID;
+
+	inner_l4_off = inner_offset + ipv4_hdrlen(&inner_ip4);
+	if ((__u64)inner_l4_off + sizeof(__be32) <= ctx_len)
+		has_inner_l4 = true;
+
+	tuple->nexthdr = inner_ip4.protocol;
+	tuple->saddr = inner_ip4.daddr;
+	tuple->daddr = inner_ip4.saddr;
+	tuple->sport = 0;
+	tuple->dport = 0;
+	tuple->flags = 0;
+
+	switch (tuple->nexthdr) {
+	case IPPROTO_TCP:
+	case IPPROTO_UDP:
+#ifdef ENABLE_SCTP
+	case IPPROTO_SCTP:
+#endif  /* ENABLE_SCTP */
+		if (!has_inner_l4 ||
+		    ctx_load_bytes(ctx, inner_l4_off, &tuple->dport,
+				   sizeof(tuple->dport) + sizeof(tuple->sport)) < 0)
+			return DROP_INVALID;
+		ipv4_ct_tuple_swap_ports(tuple);
+		break;
+	case IPPROTO_ICMP: {
+		struct icmphdr inner_icmp;
+
+		if ((__u64)inner_l4_off + sizeof(inner_icmp) > ctx_len)
+			return DROP_INVALID;
+		if (ctx_load_bytes(ctx, inner_l4_off, &inner_icmp,
+				   sizeof(inner_icmp)) < 0)
+			return DROP_INVALID;
+
+		switch (inner_icmp.type) {
+		case ICMP_ECHO:
+			tuple->dport = inner_icmp.un.echo.id;
+			break;
+		case ICMP_ECHOREPLY:
+			tuple->sport = inner_icmp.un.echo.id;
+			break;
+		default:
+			return DROP_UNSUPP_SERVICE_PROTO;
+		}
+		break;
+	}
+	default:
+		return DROP_UNSUPP_SERVICE_PROTO;
+	}
+
+	return CTX_ACT_OK;
+}
+
+static __always_inline int
+lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
+			int outer_l3_off,
+			int inner_l3_off,
+			const struct lb4_reverse_nat *nat)
+{
+	struct iphdr inner_ip4;
+	struct iphdr outer_ip4;
+	__be32 old_inner_daddr;
+	__wsum outer_csum_diff = 0;
+	__u64 ctx_len = ctx_full_len(ctx);
+	int outer_l4_off;
+	int inner_l4_off;
+	bool icmp_has_inner_l4_csum;
+
+	if (!nat)
+		return 0;
+
+	if (ctx_load_bytes(ctx, outer_l3_off, &outer_ip4, sizeof(outer_ip4)) < 0)
+		return DROP_INVALID;
+	if (outer_ip4.protocol != IPPROTO_ICMP)
+		return DROP_UNSUPP_SERVICE_PROTO;
+
+	outer_l4_off = outer_l3_off + ipv4_hdrlen(&outer_ip4);
+	if ((__u64)outer_l4_off + sizeof(struct icmphdr) > ctx_len)
+		return DROP_INVALID;
+
+	if (ctx_load_bytes(ctx, inner_l3_off, &inner_ip4, sizeof(inner_ip4)) < 0)
+		return DROP_INVALID;
+	if (inner_ip4.ihl < 5)
+		return DROP_INVALID;
+
+	inner_l4_off = inner_l3_off + ipv4_hdrlen(&inner_ip4);
+
+	/* Check whether the inner L4 checksum field is present in the ICMP payload. */
+	icmp_has_inner_l4_csum = true;
+	if (inner_ip4.protocol == IPPROTO_TCP) {
+		__u32 total_inner_len = (__u32)(ctx_len - inner_l3_off);
+
+		if (total_inner_len < ipv4_hdrlen(&inner_ip4) + TCP_CSUM_OFF + sizeof(__u16))
+			icmp_has_inner_l4_csum = false;
+	}
+
+	old_inner_daddr = inner_ip4.daddr;
+	if (old_inner_daddr != nat->address) {
+		if (ctx_store_bytes(ctx, inner_l3_off + offsetof(struct iphdr, daddr),
+				    &nat->address, sizeof(nat->address), 0) < 0)
+			return DROP_WRITE_ERROR;
+		{
+		__wsum inner_diff = csum_diff(&old_inner_daddr, sizeof(old_inner_daddr),
+					      &nat->address, sizeof(nat->address), 0);
+
+			if (ipv4_csum_update_by_diff(ctx, inner_l3_off, inner_diff) < 0)
+				return DROP_CSUM_L3;
+
+			/* When inner L4 csum is present, update it for daddr (pseudo-header) change.
+			 * The inner IP addr bytes and inner IP csum bytes cancel in the outer ICMP
+			 * csum, but the inner L4 csum reflecting the pseudo-header daddr change does
+			 * not cancel: it contributes csum_diff(new, old) to the outer ICMP csum.
+			 * When inner L4 csum is absent, all inner IP changes cancel out entirely.
+			 */
+			if (icmp_has_inner_l4_csum) {
+				struct csum_offset inner_csum = {};
+
+				csum_l4_offset_and_flags(inner_ip4.protocol, &inner_csum);
+				if (inner_csum.offset &&
+				    csum_l4_replace(ctx, inner_l4_off, &inner_csum, 0,
+						    inner_diff, BPF_F_PSEUDO_HDR) < 0)
+					return DROP_CSUM_L4;
+
+				outer_csum_diff = csum_diff(&nat->address, sizeof(nat->address),
+							    &old_inner_daddr, sizeof(old_inner_daddr),
+							    outer_csum_diff);
+			}
+		}
+	}
+
+	if (nat->port) {
+		int port_off = -1;
+
+		switch (inner_ip4.protocol) {
+		case IPPROTO_TCP:
+			port_off = TCP_DPORT_OFF;
+			break;
+		case IPPROTO_UDP:
+			port_off = UDP_DPORT_OFF;
+			break;
+		default:
+			break;
+		}
+
+		if (port_off >= 0) {
+			__be16 old_port;
+
+			if ((__u64)inner_l4_off + port_off + sizeof(old_port) > ctx_len)
+				return DROP_INVALID;
+			if (ctx_load_bytes(ctx, inner_l4_off + port_off, &old_port,
+					   sizeof(old_port)) < 0)
+				return DROP_INVALID;
+
+			if (old_port != nat->port) {
+				if (icmp_has_inner_l4_csum) {
+					struct csum_offset inner_csum = {};
+
+					csum_l4_offset_and_flags(inner_ip4.protocol, &inner_csum);
+					/* Update inner L4 csum for dport change.
+					 * The dport bytes change and the inner L4 csum change cancel
+					 * each other in the outer ICMP csum, so no outer_csum_diff
+					 * contribution here.
+					 */
+					if (inner_csum.offset) {
+						int ret = l4_modify_port(ctx, inner_l4_off, port_off,
+									 &inner_csum, nat->port, old_port);
+
+						if (ret < 0)
+							return ret;
+					} else {
+						if (ctx_store_bytes(ctx, inner_l4_off + port_off,
+								    &nat->port, sizeof(nat->port), 0) < 0)
+							return DROP_WRITE_ERROR;
+					}
+				} else {
+					__be32 old_port32 = (__be32)old_port;
+					__be32 new_port32 = (__be32)nat->port;
+
+					if (ctx_store_bytes(ctx, inner_l4_off + port_off, &nat->port,
+							    sizeof(nat->port), 0) < 0)
+						return DROP_WRITE_ERROR;
+
+					/* No inner L4 csum: dport bytes change contributes directly
+					 * to the outer ICMP csum (normal direction).
+					 */
+					outer_csum_diff = csum_diff(&old_port32, sizeof(old_port32),
+								    &new_port32, sizeof(new_port32),
+								    outer_csum_diff);
+				}
+			}
+		}
+	}
+
+	if (outer_csum_diff) {
+		struct csum_offset csum = {
+			.offset = offsetof(struct icmphdr, checksum),
+		};
+
+		if (csum_l4_replace(ctx, outer_l4_off, &csum, 0, outer_csum_diff, 0) < 0)
+			return DROP_CSUM_L4;
+	}
+
+	if (outer_ip4.saddr != nat->address) {
+		__wsum outer_diff = csum_diff(&outer_ip4.saddr, sizeof(outer_ip4.saddr),
+					      &nat->address, sizeof(nat->address), 0);
+
+		if (ctx_store_bytes(ctx, outer_l3_off + offsetof(struct iphdr, saddr),
+				    &nat->address, sizeof(nat->address), 0) < 0)
+			return DROP_WRITE_ERROR;
+
+		if (ipv4_csum_update_by_diff(ctx, outer_l3_off, outer_diff) < 0)
+			return DROP_CSUM_L3;
+	}
+
+	return 0;
 }
 
 static __always_inline
