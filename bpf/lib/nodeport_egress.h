@@ -167,7 +167,8 @@ nodeport_rev_dnat_fwd_ipv6(struct __ctx_buff *ctx, bool *snat_done,
 	void *data, *data_end;
 	struct ipv6hdr *ip6;
 	__u32 monitor = 0;
-	int ret, l4_off;
+    int ret, l4_off, inner_l3_off;
+	bool is_icmp_error = false;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
@@ -181,6 +182,12 @@ nodeport_rev_dnat_fwd_ipv6(struct __ctx_buff *ctx, bool *snat_done,
 
 	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
+		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
+			ret = lb6_extract_icmpv6_error_tuple(ctx, ip6, l4_off,
+							     &tuple, &inner_l3_off);
+			if (ret == CTX_ACT_OK)
+				is_icmp_error = true;
+		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			return CTX_ACT_OK;
 		return ret;
@@ -214,9 +221,13 @@ skip_fib:
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
-
-		ret = __lb6_rev_nat(ctx, l4_off, &tuple, &nat_info,
-				    ipfrag_has_l4_header(fraginfo), CT_EGRESS, false);
+		if (!is_icmp_error) {
+			ret = __lb6_rev_nat(ctx, l4_off, &tuple, &nat_info,
+					    ipfrag_has_l4_header(fraginfo), CT_EGRESS, false);
+		} else {
+			//yama_todo: fix parameters passed to lb6_rev_nat_icmp6_error()
+			//ret = lb6_rev_nat_icmp6_error(...)
+		}
 		if (IS_ERR(ret))
 			return ret;
 
@@ -478,7 +489,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 			   struct trace_ctx *trace, __s8 *ext_err __maybe_unused)
 {
 	struct bpf_fib_lookup_padded fib_params __maybe_unused = {};
-	int ret, l3_off = ETH_HLEN, l4_off;
+	int ret, l3_off = ETH_HLEN, l4_off, inner_l3_off = 0;
 	struct lb4_reverse_nat nat_info;
 	struct ipv4_ct_tuple tuple = {};
 	struct ct_state ct_state = {};
@@ -486,6 +497,7 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	struct iphdr *ip4;
 	fraginfo_t fraginfo;
 	__u32 monitor = 0;
+	bool is_icmp_error = false;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -496,9 +508,16 @@ nodeport_rev_dnat_fwd_ipv4(struct __ctx_buff *ctx, bool *snat_done,
 	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
+		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
+			ret = lb4_extract_icmp4_error_tuple(ctx, ip4, l4_off,
+							    &tuple, &inner_l3_off);
+			if (ret == CTX_ACT_OK)
+				is_icmp_error = true;
+		}
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			return CTX_ACT_OK;
-		return ret;
+		if (ret < 0)
+			return ret;
 	}
 
 	if (!nodeport_rev_dnat_get_info_ipv4(ctx, &tuple, &nat_info))
@@ -535,9 +554,12 @@ skip_fib:
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
-
-		ret = __lb4_rev_nat(ctx, l3_off, l4_off, &tuple,
+		if (!is_icmp_error) {
+			ret = __lb4_rev_nat(ctx, l3_off, l4_off, &tuple,
 				    &nat_info, false, ipfrag_has_l4_header(fraginfo));
+		} else {
+			ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off, &nat_info);
+		}
 		if (IS_ERR(ret))
 			return ret;
 
