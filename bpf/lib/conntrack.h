@@ -346,7 +346,6 @@ ct_entry_matches_types(const struct ct_entry *entry __maybe_unused,
 	return false;
 }
 
-// yama_todo: icmp errorの時はtimeout設定しない
 /**
  * Returns CT_NEW or CT_ESTABLISHED.
  * 'ct_state', if not nullptr, will be filled in only if CT_ESTABLISHED is returned.
@@ -921,11 +920,11 @@ ct_extract_ports4(const struct __ctx_buff *ctx, const struct iphdr *ip4, fraginf
 /* This defines the ct_is_reply4 function. */
 DEFINE_FUNC_CT_IS_REPLY(4)
 
-// yama_todo: この関数でl4_offを見てicmp_errorならばtcp_flagsには値をsetしない
 static __always_inline int
 __ct_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx_buff *ctx,
-	     fraginfo_t fraginfo, int l4_off, enum ct_dir dir, enum ct_scope scope,
-	     __u32 ct_entry_types, struct ct_state *ct_state, __u32 *monitor)
+	     fraginfo_t fraginfo, int l4_off, bool skip_l4_flags, enum ct_dir dir,
+	     enum ct_scope scope, __u32 ct_entry_types, struct ct_state *ct_state,
+	     __u32 *monitor)
 {
 	bool is_tcp = tuple->nexthdr == IPPROTO_TCP;
 	union tcp_flags tcp_flags = { .value = 0 };
@@ -935,7 +934,7 @@ __ct_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx_bu
 	if (CONFIG(enable_ipv4_fragments) && ipfrag_is_fragment(fraginfo))
 		update_metrics(ctx_full_len(ctx), ct_to_metrics_dir(dir), REASON_FRAG_PACKET);
 
-	if (is_tcp && ipfrag_has_l4_header(fraginfo)) {
+	if (!skip_l4_flags && is_tcp && ipfrag_has_l4_header(fraginfo)) {
 		if (l4_load_tcp_flags(ctx, l4_off, &tcp_flags) < 0)
 			return DROP_CT_INVALID_HDR;
 
@@ -1011,7 +1010,29 @@ ct_lazy_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx
 {
 	tuple->flags = ct_lookup_select_tuple_type(dir, scope);
 
-	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, dir,
+	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, false, dir,
+			    scope, ct_entry_types, ct_state, monitor);
+}
+
+/**
+ * ct_lazy_lookup4_icmp_error - CT lookup for ICMP error packets carrying an
+ * inner IPv4/TCP tuple.
+ *
+ * Like ct_lazy_lookup4(), but skips loading TCP flags from l4_off. This is
+ * needed because l4_off points to the outer ICMP header, not the inner TCP
+ * header, so reading flags from it would produce garbage and corrupt the CT
+ * entry state.
+ */
+static __always_inline int
+ct_lazy_lookup4_icmp_error(const void *map, struct ipv4_ct_tuple *tuple,
+			   const struct __ctx_buff *ctx, fraginfo_t fraginfo,
+			   int l4_off, enum ct_dir dir, enum ct_scope scope,
+			   __u32 ct_entry_types, struct ct_state *ct_state,
+			   __u32 *monitor)
+{
+	tuple->flags = ct_lookup_select_tuple_type(dir, scope);
+
+	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, true, dir,
 			    scope, ct_entry_types, ct_state, monitor);
 }
 
@@ -1036,7 +1057,7 @@ static __always_inline int ct_lookup4(const void *map,
 	if (scope == SCOPE_FORWARD)
 		__ipv4_ct_tuple_reverse(tuple);
 
-	return __ct_lookup4(map, tuple, ctx, fraginfo, off, dir,
+	return __ct_lookup4(map, tuple, ctx, fraginfo, off, false, dir,
 			    scope, CT_ENTRY_ANY, ct_state, monitor);
 }
 

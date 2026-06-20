@@ -527,10 +527,16 @@ skip_fib:
 #endif
 
 	/* Cache is_fragment in advance, nodeport_fib_lookup_and_redirect may invalidate ip4. */
-	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
-			      l4_off, CT_INGRESS, SCOPE_REVERSE,
-			      CT_ENTRY_NODEPORT | CT_ENTRY_DSR,
-			      &ct_state, &monitor);
+	if (is_icmp_error)
+		ret = ct_lazy_lookup4_icmp_error(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
+						 l4_off, CT_INGRESS, SCOPE_REVERSE,
+						 CT_ENTRY_NODEPORT | CT_ENTRY_DSR,
+						 &ct_state, &monitor);
+	else
+		ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
+				      l4_off, CT_INGRESS, SCOPE_REVERSE,
+				      CT_ENTRY_NODEPORT | CT_ENTRY_DSR,
+				      &ct_state, &monitor);
 
 	/* nodeport_rev_dnat_get_info_ipv4() just checked that such a
 	 * CT entry exists:
