@@ -2346,9 +2346,14 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	else if (ret == CTX_ACT_REDIRECT)
 		goto redirect;
 
-	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
-			      l4_off, CT_INGRESS, SCOPE_REVERSE,
-			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
+	if (is_icmp_error)
+		ret = ct_lazy_lookup4_icmp_error(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
+						 l4_off, CT_INGRESS, SCOPE_REVERSE,
+						 CT_ENTRY_NODEPORT, &ct_state, &monitor);
+	else
+		ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, fraginfo,
+				      l4_off, CT_INGRESS, SCOPE_REVERSE,
+				      CT_ENTRY_NODEPORT, &ct_state, &monitor);
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
 		trace->monitor = monitor;
