@@ -46,3 +46,24 @@ nodeport_lb4_icmp_error_after = (
     IP(src=v4_ext_one, dst=v4_svc_two, ttl=64, flags="DF") /
     TCP(sport=111, dport=tcp_svc_one, seq=tcp_default_seq, flags="S")
 )
+
+
+# DSR backend node ICMP error RevDNAT scenario:
+# Backend node (mac_three, v4_pod_one) sends ICMP Frag Needed to client (mac_one, v4_ext_one),
+# referencing the original request (v4_ext_one:111 -> v4_pod_one:8080).
+dsr_backend_icmp4_err_before = (
+    Ether(src=mac_three, dst=mac_one) /
+    IP(src=v4_pod_one, dst=v4_ext_one, ttl=64) /
+    ICMP(type=3, code=4, nexthopmtu=1500) /
+    IP(src=v4_ext_one, dst=v4_pod_one, ttl=64, flags="DF") /
+    TCP(sport=111, dport=8080, seq=tcp_default_seq, flags="S")
+)
+
+# After RevDNAT: outer src BACKEND_IP -> FRONTEND_IP, inner dst BACKEND_IP:8080 -> FRONTEND_IP:80.
+dsr_backend_icmp4_err_after = (
+    Ether(src=mac_three, dst=mac_one) /
+    IP(src=v4_svc_one, dst=v4_ext_one, ttl=64) /
+    ICMP(type=3, code=4, nexthopmtu=1500) /
+    IP(src=v4_ext_one, dst=v4_svc_one, ttl=64, flags="DF") /
+    TCP(sport=111, dport=tcp_svc_one, seq=tcp_default_seq, flags="S")
+)
