@@ -922,9 +922,8 @@ DEFINE_FUNC_CT_IS_REPLY(4)
 
 static __always_inline int
 __ct_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx_buff *ctx,
-	     fraginfo_t fraginfo, int l4_off, bool skip_l4_flags, enum ct_dir dir,
-	     enum ct_scope scope, __u32 ct_entry_types, struct ct_state *ct_state,
-	     __u32 *monitor)
+	     fraginfo_t fraginfo, int l4_off, enum ct_dir dir, enum ct_scope scope,
+	     __u32 ct_entry_types, struct ct_state *ct_state, __u32 *monitor)
 {
 	bool is_tcp = tuple->nexthdr == IPPROTO_TCP;
 	union tcp_flags tcp_flags = { .value = 0 };
@@ -934,7 +933,7 @@ __ct_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx_bu
 	if (CONFIG(enable_ipv4_fragments) && ipfrag_is_fragment(fraginfo))
 		update_metrics(ctx_full_len(ctx), ct_to_metrics_dir(dir), REASON_FRAG_PACKET);
 
-	if (!skip_l4_flags && is_tcp && ipfrag_has_l4_header(fraginfo)) {
+	if (is_tcp && ipfrag_has_l4_header(fraginfo)) {
 		if (l4_load_tcp_flags(ctx, l4_off, &tcp_flags) < 0)
 			return DROP_CT_INVALID_HDR;
 
@@ -1010,30 +1009,58 @@ ct_lazy_lookup4(const void *map, struct ipv4_ct_tuple *tuple, const struct __ctx
 {
 	tuple->flags = ct_lookup_select_tuple_type(dir, scope);
 
-	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, false, dir,
+	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, dir,
 			    scope, ct_entry_types, ct_state, monitor);
 }
 
 /**
- * ct_lazy_lookup4_icmp_error - CT lookup for ICMP error packets carrying an
- * inner IPv4/TCP tuple.
+ * ct_lazy_lookup4_icmp_error - CT lookup for an ICMP error packet whose inner
+ * tuple identifies an existing IPv4 connection.
  *
- * Like ct_lazy_lookup4(), but skips loading TCP flags from l4_off. This is
- * needed because l4_off points to the outer ICMP header, not the inner TCP
- * header, so reading flags from it would produce garbage and corrupt the CT
- * entry state.
+ * Unlike ct_lazy_lookup4(), this function:
+ *  - does not read TCP flags from l4_off (l4_off points to the outer ICMP
+ *    header, not the inner TCP header, so reading flags would yield garbage
+ *    and could corrupt CT entry state), and
+ *  - does not refresh the CT entry timeout (ICMP error packets are error
+ *    notifications, not data traffic, matching Linux nf_conntrack behaviour).
+ *
+ * Only supports SCOPE_REVERSE (ICMP errors always travel in the return path).
  */
 static __always_inline int
 ct_lazy_lookup4_icmp_error(const void *map, struct ipv4_ct_tuple *tuple,
-			   const struct __ctx_buff *ctx, fraginfo_t fraginfo,
-			   int l4_off, enum ct_dir dir, enum ct_scope scope,
-			   __u32 ct_entry_types, struct ct_state *ct_state,
-			   __u32 *monitor)
+			   const struct __ctx_buff *ctx,
+			   fraginfo_t fraginfo __maybe_unused,
+			   int l4_off __maybe_unused, enum ct_dir dir,
+			   enum ct_scope scope, __u32 ct_entry_types,
+			   struct ct_state *ct_state, __u32 *monitor)
 {
+	struct ct_entry *entry;
+
 	tuple->flags = ct_lookup_select_tuple_type(dir, scope);
 
-	return __ct_lookup4(map, tuple, ctx, fraginfo, l4_off, true, dir,
-			    scope, ct_entry_types, ct_state, monitor);
+	entry = map_lookup_elem(map, tuple);
+	if (!entry || !ct_entry_matches_types(entry, ct_entry_types, ct_state))
+		goto ct_new;
+
+	cilium_dbg(ctx, DBG_CT_MATCH, entry->lifetime, entry->rev_nat_index);
+
+	if (CONFIG(enable_conntrack_accounting)) {
+		__sync_fetch_and_add(&entry->packets, 1);
+		__sync_fetch_and_add(&entry->bytes, ctx_full_len(ctx));
+	}
+
+	if (ct_state)
+		ct_lookup_fill_state(ct_state, entry, dir, false);
+
+	cilium_dbg(ctx, DBG_CT_VERDICT, CT_REPLY,
+		   ct_state ? ct_state->rev_nat_index : 0);
+	*monitor = TRACE_PAYLOAD_LEN;
+	return CT_REPLY;
+
+ct_new:
+	cilium_dbg(ctx, DBG_CT_VERDICT, CT_NEW, 0);
+	*monitor = TRACE_PAYLOAD_LEN;
+	return CT_NEW;
 }
 
 /* Offset must point to IPv4 header */
@@ -1057,7 +1084,7 @@ static __always_inline int ct_lookup4(const void *map,
 	if (scope == SCOPE_FORWARD)
 		__ipv4_ct_tuple_reverse(tuple);
 
-	return __ct_lookup4(map, tuple, ctx, fraginfo, off, false, dir,
+	return __ct_lookup4(map, tuple, ctx, fraginfo, off, dir,
 			    scope, CT_ENTRY_ANY, ct_state, monitor);
 }
 
