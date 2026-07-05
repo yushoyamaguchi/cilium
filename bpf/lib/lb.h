@@ -1798,6 +1798,7 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
 	if (ipfrag_is_fragment(fraginfo))
 		return DROP_UNSUPP_SERVICE_PROTO;
 
+	/* Only ICMP error types embed the original packet we need to extract. */
 	if (ctx_load_bytes(ctx, (__u32)l4_off, &icmph, sizeof(icmph)) < 0)
 		return DROP_INVALID;
 
@@ -1815,6 +1816,7 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
 		return DROP_UNSUPP_SERVICE_PROTO;
 	}
 
+	/* Load the original packet embedded in the ICMP error payload. */
 	inner_offset = (__u32)(l4_off + sizeof(struct icmphdr));
 	if (inner_l3_off)
 		*inner_l3_off = (int)inner_offset;
@@ -1827,10 +1829,12 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
 	if (inner_ip4.ihl < 5)
 		return DROP_INVALID;
 
+	/* The inner L4 header may be truncated in the ICMP payload. */
 	inner_l4_off = inner_offset + ipv4_hdrlen(&inner_ip4);
 	if ((__u64)inner_l4_off + sizeof(__be32) <= ctx_len)
 		has_inner_l4 = true;
 
+	/* Embedded packet's direction is reversed, so saddr/daddr are swapped. */
 	tuple->nexthdr = inner_ip4.protocol;
 	tuple->saddr = inner_ip4.daddr;
 	tuple->daddr = inner_ip4.saddr;
@@ -1838,6 +1842,7 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
 	tuple->dport = 0;
 	tuple->flags = 0;
 
+	/* Fill in ports (or ICMP echo id) from the inner L4 header. */
 	switch (tuple->nexthdr) {
 	case IPPROTO_TCP:
 	case IPPROTO_UDP:
@@ -1878,6 +1883,99 @@ lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
 	return CTX_ACT_OK;
 }
 
+/* lb4_icmp4_error_calc_outer_l4_csum_diff - outer ICMP (L4) csum contribution of
+ * rewriting the embedded inner packet's daddr/dport. Does not touch ctx.
+ *
+ * With an inner L4 csum, only its pseudo-header update escapes cancellation, so
+ * daddr contributes csum_diff(new, old) and dport contributes nothing. Without
+ * one, all inner IP changes cancel and only dport contributes directly.
+ */
+static __always_inline void
+lb4_icmp4_error_calc_outer_l4_csum_diff(__be32 old_daddr, __be32 new_daddr,
+					__be16 old_port, __be16 new_port,
+					bool icmp_has_inner_l4_csum,
+					__wsum *outer_l4_csum_diff)
+{
+	*outer_l4_csum_diff = 0;
+
+	if (icmp_has_inner_l4_csum) {
+		if (old_daddr != new_daddr)
+			*outer_l4_csum_diff = csum_diff(&new_daddr, sizeof(new_daddr),
+							&old_daddr, sizeof(old_daddr), 0);
+	} else {
+		if (old_port != new_port) {
+			__be32 old_port32 = (__be32)old_port;
+			__be32 new_port32 = (__be32)new_port;
+
+			*outer_l4_csum_diff = csum_diff(&old_port32, sizeof(old_port32),
+							&new_port32, sizeof(new_port32), 0);
+		}
+	}
+}
+
+/* lb4_icmp4_error_rewrite_inner - rewrite the daddr/dport of the packet embedded
+ * in an ICMPv4 error's payload, updating the inner IP and (when present) inner L4
+ * checksums. Does not touch the outer ICMP (L4) checksum; see
+ * lb4_icmp4_error_calc_outer_l4_csum_diff() for that.
+ */
+static __always_inline int
+lb4_icmp4_error_rewrite_inner(struct __ctx_buff *ctx, int inner_l3_off, int inner_l4_off,
+			      __u8 inner_proto, __be32 old_daddr, __be32 new_daddr,
+			      int port_off, __be16 old_port, __be16 new_port,
+			      bool icmp_has_inner_l4_csum)
+{
+	if (old_daddr != new_daddr) {
+		__wsum inner_diff = csum_diff(&old_daddr, sizeof(old_daddr),
+					      &new_daddr, sizeof(new_daddr), 0);
+
+		if (ctx_store_bytes(ctx, inner_l3_off + offsetof(struct iphdr, daddr),
+				    &new_daddr, sizeof(new_daddr), 0) < 0)
+			return DROP_WRITE_ERROR;
+
+		if (ipv4_csum_update_by_diff(ctx, inner_l3_off, inner_diff) < 0)
+			return DROP_CSUM_L3;
+
+		if (icmp_has_inner_l4_csum) {
+			struct csum_offset inner_csum = {};
+
+			csum_l4_offset_and_flags(inner_proto, &inner_csum);
+			if (inner_csum.offset &&
+			    csum_l4_replace(ctx, inner_l4_off, &inner_csum, 0,
+					    inner_diff, BPF_F_PSEUDO_HDR) < 0)
+				return DROP_CSUM_L4;
+		}
+	}
+
+	if (port_off >= 0 && old_port != new_port) {
+		if (icmp_has_inner_l4_csum) {
+			struct csum_offset inner_csum = {};
+
+			csum_l4_offset_and_flags(inner_proto, &inner_csum);
+			if (inner_csum.offset) {
+				int ret = l4_modify_port(ctx, inner_l4_off, port_off,
+							 &inner_csum, new_port, old_port);
+
+				if (ret < 0)
+					return ret;
+			} else {
+				if (ctx_store_bytes(ctx, inner_l4_off + port_off,
+						    &new_port, sizeof(new_port), 0) < 0)
+					return DROP_WRITE_ERROR;
+			}
+		} else {
+			if (ctx_store_bytes(ctx, inner_l4_off + port_off, &new_port,
+					    sizeof(new_port), 0) < 0)
+				return DROP_WRITE_ERROR;
+		}
+	}
+
+	return 0;
+}
+
+/* lb4_rev_nat_icmp4_error - reverse NAT an ICMPv4 error sent back by a backend.
+ * Rewrites the backend's address/port back to the service's in both the embedded
+ * inner packet and the outer ICMP/IP headers, keeping all checksums consistent.
+ */
 static __always_inline int
 lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 			int outer_l3_off,
@@ -1886,12 +1984,15 @@ lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 {
 	struct iphdr inner_ip4;
 	struct iphdr outer_ip4;
-	__be32 old_inner_daddr;
-	__wsum outer_csum_diff = 0;
+	__wsum outer_l4_csum_diff;
 	__u64 ctx_len = ctx_full_len(ctx);
 	int outer_l4_off;
 	int inner_l4_off;
 	bool icmp_has_inner_l4_csum;
+	int port_off = -1;
+	__be16 old_port = 0;
+	__be16 new_port = 0;
+	int ret;
 
 	if (!nat)
 		return 0;
@@ -1905,6 +2006,7 @@ lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 	if ((__u64)outer_l4_off + sizeof(struct icmphdr) > ctx_len)
 		return DROP_INVALID;
 
+	/* Load the original packet embedded in the ICMP error payload. */
 	if (ctx_load_bytes(ctx, inner_l3_off, &inner_ip4, sizeof(inner_ip4)) < 0)
 		return DROP_INVALID;
 	if (inner_ip4.ihl < 5)
@@ -1921,43 +2023,8 @@ lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 			icmp_has_inner_l4_csum = false;
 	}
 
-	old_inner_daddr = inner_ip4.daddr;
-	if (old_inner_daddr != nat->address) {
-		if (ctx_store_bytes(ctx, inner_l3_off + offsetof(struct iphdr, daddr),
-				    &nat->address, sizeof(nat->address), 0) < 0)
-			return DROP_WRITE_ERROR;
-		{
-		__wsum inner_diff = csum_diff(&old_inner_daddr, sizeof(old_inner_daddr),
-					      &nat->address, sizeof(nat->address), 0);
-
-			if (ipv4_csum_update_by_diff(ctx, inner_l3_off, inner_diff) < 0)
-				return DROP_CSUM_L3;
-
-			/* When inner L4 csum is present, update it for daddr (pseudo-header) change.
-			 * The inner IP addr bytes and inner IP csum bytes cancel in the outer ICMP
-			 * csum, but the inner L4 csum reflecting the pseudo-header daddr change does
-			 * not cancel: it contributes csum_diff(new, old) to the outer ICMP csum.
-			 * When inner L4 csum is absent, all inner IP changes cancel out entirely.
-			 */
-			if (icmp_has_inner_l4_csum) {
-				struct csum_offset inner_csum = {};
-
-				csum_l4_offset_and_flags(inner_ip4.protocol, &inner_csum);
-				if (inner_csum.offset &&
-				    csum_l4_replace(ctx, inner_l4_off, &inner_csum, 0,
-						    inner_diff, BPF_F_PSEUDO_HDR) < 0)
-					return DROP_CSUM_L4;
-
-				outer_csum_diff = csum_diff(&nat->address, sizeof(nat->address),
-							    &old_inner_daddr, sizeof(old_inner_daddr),
-							    outer_csum_diff);
-			}
-		}
-	}
-
+	/* Find and load the inner dport, if the protocol carries one. */
 	if (nat->port) {
-		int port_off = -1;
-
 		switch (inner_ip4.protocol) {
 		case IPPROTO_TCP:
 			port_off = TCP_DPORT_OFF;
@@ -1970,72 +2037,50 @@ lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 		}
 
 		if (port_off >= 0) {
-			__be16 old_port;
-
 			if ((__u64)inner_l4_off + port_off + sizeof(old_port) > ctx_len)
 				return DROP_INVALID;
 			if (ctx_load_bytes(ctx, inner_l4_off + port_off, &old_port,
 					   sizeof(old_port)) < 0)
 				return DROP_INVALID;
-
-			if (old_port != nat->port) {
-				if (icmp_has_inner_l4_csum) {
-					struct csum_offset inner_csum = {};
-
-					csum_l4_offset_and_flags(inner_ip4.protocol, &inner_csum);
-					/* Update inner L4 csum for dport change.
-					 * The dport bytes change and the inner L4 csum change cancel
-					 * each other in the outer ICMP csum, so no outer_csum_diff
-					 * contribution here.
-					 */
-					if (inner_csum.offset) {
-						int ret = l4_modify_port(ctx, inner_l4_off, port_off,
-									 &inner_csum, nat->port, old_port);
-
-						if (ret < 0)
-							return ret;
-					} else {
-						if (ctx_store_bytes(ctx, inner_l4_off + port_off,
-								    &nat->port, sizeof(nat->port), 0) < 0)
-							return DROP_WRITE_ERROR;
-					}
-				} else {
-					__be32 old_port32 = (__be32)old_port;
-					__be32 new_port32 = (__be32)nat->port;
-
-					if (ctx_store_bytes(ctx, inner_l4_off + port_off, &nat->port,
-							    sizeof(nat->port), 0) < 0)
-						return DROP_WRITE_ERROR;
-
-					/* No inner L4 csum: dport bytes change contributes directly
-					 * to the outer ICMP csum (normal direction).
-					 */
-					outer_csum_diff = csum_diff(&old_port32, sizeof(old_port32),
-								    &new_port32, sizeof(new_port32),
-								    outer_csum_diff);
-				}
-			}
+			new_port = nat->port;
 		}
 	}
 
-	if (outer_csum_diff) {
+	/* Work out the outer ICMP csum impact before rewriting anything. */
+	lb4_icmp4_error_calc_outer_l4_csum_diff(inner_ip4.daddr, nat->address,
+						old_port, new_port,
+						icmp_has_inner_l4_csum,
+						&outer_l4_csum_diff);
+
+	/* Rewrite the embedded packet's daddr/dport to the backend's. */
+	ret = lb4_icmp4_error_rewrite_inner(ctx, inner_l3_off, inner_l4_off,
+					    inner_ip4.protocol,
+					    inner_ip4.daddr, nat->address,
+					    port_off, old_port, new_port,
+					    icmp_has_inner_l4_csum);
+	if (ret < 0)
+		return ret;
+
+	/* Reflect the inner rewrite's impact in the outer ICMP (L4) checksum. */
+	if (outer_l4_csum_diff) {
 		struct csum_offset csum = {
 			.offset = offsetof(struct icmphdr, checksum),
 		};
 
-		if (csum_l4_replace(ctx, outer_l4_off, &csum, 0, outer_csum_diff, 0) < 0)
+		if (csum_l4_replace(ctx, outer_l4_off, &csum, 0, outer_l4_csum_diff, 0) < 0)
 			return DROP_CSUM_L4;
 	}
 
+	/* Outer IP source is the backend; rewrite it to the service address too. */
 	if (outer_ip4.saddr != nat->address) {
-		__wsum outer_diff = csum_diff(&outer_ip4.saddr, sizeof(outer_ip4.saddr),
-					      &nat->address, sizeof(nat->address), 0);
+		__wsum outer_l3_csum_diff = csum_diff(&outer_ip4.saddr, sizeof(outer_ip4.saddr),
+						      &nat->address, sizeof(nat->address), 0);
 
 		if (ctx_store_bytes(ctx, outer_l3_off + offsetof(struct iphdr, saddr),
 				    &nat->address, sizeof(nat->address), 0) < 0)
 			return DROP_WRITE_ERROR;
 
-		if (ipv4_csum_update_by_diff(ctx, outer_l3_off, outer_diff) < 0)
+		if (ipv4_csum_update_by_diff(ctx, outer_l3_off, outer_l3_csum_diff) < 0)
 			return DROP_CSUM_L3;
 	}
 
