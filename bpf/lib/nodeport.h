@@ -2351,7 +2351,8 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 			if (!nat)
 				ret = 0;
 			else
-				ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off, nat);
+				ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off,
+							      nat, ip4);
 		}
 		if (IS_ERR(ret))
 			return ret;

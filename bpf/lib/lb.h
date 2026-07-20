@@ -1925,31 +1925,39 @@ static __always_inline int
 lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 			int outer_l3_off,
 			int inner_l3_off,
-			const struct lb4_reverse_nat *nat)
+			const struct lb4_reverse_nat *nat,
+			const struct iphdr *outer_ip4)
 {
 	struct iphdr inner_ip4;
-	struct iphdr outer_ip4;
 	__wsum outer_l4_csum_diff;
 	__u64 ctx_len = ctx_full_len(ctx);
 	int outer_l4_off;
 	int inner_l4_off;
+	int outer_hdr_len;
 	bool icmp_has_inner_l4_csum;
 	int port_off = -1;
 	__be16 old_port = 0;
 	__be16 new_port = 0;
+	__be32 outer_saddr;
+	__u8 outer_proto;
 	int ret;
 
 	if (!nat)
 		return 0;
 
-	if (ctx_load_bytes(ctx, outer_l3_off, &outer_ip4, sizeof(outer_ip4)) < 0)
+	if (!outer_ip4)
 		return DROP_INVALID;
-	if (outer_ip4.protocol != IPPROTO_ICMP)
+
+	outer_proto = outer_ip4->protocol;
+	if (outer_proto != IPPROTO_ICMP)
 		return DROP_UNSUPP_SERVICE_PROTO;
 
-	outer_l4_off = outer_l3_off + ipv4_hdrlen(&outer_ip4);
+	outer_hdr_len = ipv4_hdrlen(outer_ip4);
+	outer_l4_off = outer_l3_off + outer_hdr_len;
 	if ((__u64)outer_l4_off + sizeof(struct icmphdr) > ctx_len)
 		return DROP_INVALID;
+
+	outer_saddr = outer_ip4->saddr;
 
 	/* Load the original packet embedded in the ICMP error payload. */
 	if (ctx_load_bytes(ctx, inner_l3_off, &inner_ip4, sizeof(inner_ip4)) < 0)
@@ -2015,8 +2023,8 @@ lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 	}
 
 	/* Outer IP source is the backend; rewrite it to the service address too. */
-	if (outer_ip4.saddr != nat->address) {
-		__wsum outer_l3_csum_diff = csum_diff(&outer_ip4.saddr, sizeof(outer_ip4.saddr),
+	if (outer_saddr != nat->address) {
+		__wsum outer_l3_csum_diff = csum_diff(&outer_saddr, sizeof(outer_saddr),
 						      &nat->address, sizeof(nat->address), 0);
 
 		if (ctx_store_bytes(ctx, outer_l3_off + offsetof(struct iphdr, saddr),

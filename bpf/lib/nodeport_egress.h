@@ -553,7 +553,8 @@ skip_fib:
 			ret = __lb4_rev_nat(ctx, l3_off, l4_off, &tuple,
 					    &nat_info, false, ipfrag_has_l4_header(fraginfo));
 		} else {
-			ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off, &nat_info);
+			ret = lb4_rev_nat_icmp4_error(ctx, l3_off, inner_l3_off,
+						       &nat_info, ip4);
 		}
 		if (IS_ERR(ret))
 			return ret;
