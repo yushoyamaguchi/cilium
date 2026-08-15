@@ -1747,7 +1747,7 @@ lb4_extract_tuple(const struct __ctx_buff *ctx, const struct iphdr *ip4, fraginf
  * only (the v6 equivalent of ICMPv4 Frag Needed): snat_v6_rev_nat_handle_icmp_pkt_toobig()
  * is the only ICMPv6 error type with existing RevSNAT support to build RevDNAT on top of.
  */
-static __always_inline int
+__noinline __weak int
 lb4_extract_icmp4_error_tuple(struct __ctx_buff *ctx,
 			      const struct iphdr *ip4,
 			      int l4_off,
@@ -1944,7 +1944,7 @@ lb4_icmp4_error_rewrite_inner(struct __ctx_buff *ctx, int inner_l3_off, int inne
  * Rewrites the backend's address/port back to the service's in both the embedded
  * inner packet and the outer ICMP/IP headers, keeping all checksums consistent.
  */
-static __always_inline int
+__noinline __weak int
 lb4_rev_nat_icmp4_error(struct __ctx_buff *ctx,
 			int outer_l3_off,
 			int inner_l3_off,
